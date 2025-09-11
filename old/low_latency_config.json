@@ -1,0 +1,22 @@
+{
+  "basic_settings": {
+    "low_freq_sensitivity": 1.0,
+    "high_freq_sensitivity": 2.5,
+    "overall_intensity": 1.0,
+    "preset": "intense"
+  },
+  "advanced_settings": {
+    "smoothing_factor": 0.0,
+    "frequency_cutoff": 400,
+    "frequency_difference_factor": 0.3,
+    "min_low_freq_threshold": 0.1,
+    "min_high_freq_threshold": 0.05,
+    "min_volume_threshold": 0.02,
+    "max_volume_threshold": 1.0
+  },
+  "performance_settings": {
+    "chunk_size": 16,
+    "enable_sound_classification": false,
+    "enable_impact_enhancement": false
+  }
+}
