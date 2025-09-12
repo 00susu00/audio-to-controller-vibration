@@ -183,7 +183,6 @@ class AudioVibrationGUIv2:
         device_buttons.pack(fill=tk.X, padx=5, pady=5)
         
         ttk.Button(device_buttons, text="刷新设备", command=self.refresh_devices).pack(side=tk.LEFT)
-        ttk.Button(device_buttons, text="系统音频帮助", command=self.show_system_audio_help).pack(side=tk.LEFT, padx=(5, 0))
         
         # 手柄控制
         controller_group = ttk.LabelFrame(parent, text="🎮 手柄控制")
@@ -697,12 +696,6 @@ class AudioVibrationGUIv2:
                         self.update_status(f"已选择输入设备: {selected_device['name']}")
         except Exception as e:
             print(f"设备切换错误: {e}")
-    
-    def show_system_audio_help(self):
-        """显示系统音频帮助"""
-        from system_audio_setup import SystemAudioHelper
-        helper = SystemAudioHelper()
-        helper.show_setup_gui()
     
     def toggle_conversion(self):
         """开始/停止音频转换"""
