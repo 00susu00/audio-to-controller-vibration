@@ -68,7 +68,7 @@
 ### **1. 克隆仓库 | Clone Repository**
 
 ```bash
-git clone https://github.com/yourusername/audio-to-controller-vibration.git
+git clone https://github.com/Kirin-0321/audio-to-controller-vibration.git
 cd audio-to-controller-vibration
 ```
 
@@ -253,14 +253,14 @@ python main.py --no-high-priority  # 禁用对比
 ### **🔧 诊断工具 | Diagnostic Tools**
 
 ```bash
-# 音频设备诊断
-python test/nvidia_audio_helper.py
-
 # 手柄连接测试
 python test/xinput_controller_test.py
 
 # 系统音频设置
 python test/system_audio_setup.py
+
+# 延迟测试配置
+python test/test_latency_configs.py
 ```
 
 ## 📚 文档 | Documentation
@@ -296,7 +296,7 @@ python test/system_audio_setup.py
 
 ```bash
 # 克隆开发版本
-git clone https://github.com/yourusername/audio-to-controller-vibration.git
+git clone https://github.com/Kirin-0321/audio-to-controller-vibration.git
 cd audio-to-controller-vibration
 
 # 安装开发依赖
@@ -320,8 +320,8 @@ python test/xinput_controller_test.py
 
 ## 📞 联系方式 | Contact
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/audio-to-controller-vibration/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/audio-to-controller-vibration/discussions)
+- **Issues**: [GitHub Issues](https://github.com/Kirin-0321/audio-to-controller-vibration/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Kirin-0321/audio-to-controller-vibration/discussions)
 
 ---
 
@@ -329,7 +329,7 @@ python test/xinput_controller_test.py
 
 **🎮 享受沉浸式的音频震动体验！| Enjoy immersive audio-haptic experience! 🎮**
 
-[![GitHub stars](https://img.shields.io/github/stars/yourusername/audio-to-controller-vibration?style=social)](https://github.com/yourusername/audio-to-controller-vibration/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/yourusername/audio-to-controller-vibration?style=social)](https://github.com/yourusername/audio-to-controller-vibration/network)
+[![GitHub stars](https://img.shields.io/github/stars/Kirin-0321/audio-to-controller-vibration?style=social)](https://github.com/Kirin-0321/audio-to-controller-vibration/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/Kirin-0321/audio-to-controller-vibration?style=social)](https://github.com/Kirin-0321/audio-to-controller-vibration/network)
 
 </div>
