@@ -15,7 +15,8 @@
     "frequency_cutoff": 400,
     "frequency_difference_factor": 0.5,
     "continuous_sound_suppression": 0.75,
-    "midrange_dialogue_suppression": 0.3
+    "midrange_dialogue_suppression": 0.3,
+    "transient_preservation": 1
   },
   "sound_classification": {
     "enabled": false,
