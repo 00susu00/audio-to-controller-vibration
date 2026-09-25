@@ -16,7 +16,16 @@
     "frequency_difference_factor": 0.5,
     "continuous_sound_suppression": 0.75,
     "midrange_dialogue_suppression": 0.3,
-    "transient_preservation": 1
+    "transient_preservation": 1,
+    "enable_six_band_mapping": true,
+    "band_weights": {
+      "sub_bass": 1,
+      "bass": 0.9,
+      "low_mid": 0.45,
+      "mid": 0.15,
+      "high_mid": 0.55,
+      "treble": 0.7
+    }
   },
   "sound_classification": {
     "enabled": false,
