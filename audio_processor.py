@@ -35,6 +35,7 @@ class AudioProcessor:
         # 数据队列 - 减小队列大小以降低延迟
         self.audio_queue = queue.Queue(maxsize=3)
         self.volume_window_size = 3
+        self.impact_energy_threshold = 5.0
         
         # 频谱分析参数
         self.window = np.hanning(chunk_size)
@@ -353,9 +354,12 @@ class AudioProcessor:
                 energy_ratio = current_energy / (previous_energy + 1e-10)
                 
                 # 冲击检测阈值
-                if energy_ratio > 5.0:  # 能量增加5倍以上
+                if energy_ratio > self.impact_energy_threshold:
                     events['impact_detected'] = True
-                    events['impact_intensity'] = min(1.0, energy_ratio / 10.0)
+                    events['impact_intensity'] = min(
+                        1.0,
+                        energy_ratio / max(self.impact_energy_threshold * 2.0, 1e-6)
+                    )
                 
                 events['energy_change_rate'] = energy_ratio - 1.0
             
@@ -446,3 +450,7 @@ class AudioProcessor:
         """设置滤波器截止频率"""
         self.lowpass_filter = self._create_lowpass_filter(cutoff_freq)
         self.highpass_filter = self._create_highpass_filter(cutoff_freq)
+
+    def set_impact_energy_threshold(self, threshold):
+        """设置冲击检测的能量倍数阈值"""
+        self.impact_energy_threshold = max(1.01, float(threshold))
