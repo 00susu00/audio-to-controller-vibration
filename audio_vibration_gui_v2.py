@@ -166,6 +166,11 @@ class AudioVibrationGUIv2:
         advanced_frame = ttk.Frame(notebook)
         notebook.add(advanced_frame, text="⚙️ 高级设置")
         self.setup_advanced_panel(advanced_frame)
+        
+        # 选项卡5：六频段映射
+        band_mapping_frame = ttk.Frame(notebook)
+        notebook.add(band_mapping_frame, text="🎛️ 六频段映射")
+        self.setup_band_mapping_panel(band_mapping_frame)
     
     def setup_basic_panel(self, parent):
         """设置基础面板"""
@@ -580,6 +585,65 @@ class AudioVibrationGUIv2:
         
         # 配置管理已移至首页基础设置，此处移除重复按钮
     
+    def setup_band_mapping_panel(self, parent):
+        """设置六频段震动映射面板"""
+        switch_group = ttk.LabelFrame(parent, text="🎛️ 六频段映射开关")
+        switch_group.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.six_band_mapping_enabled = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            switch_group,
+            text="启用六频段加权震动映射",
+            variable=self.six_band_mapping_enabled,
+            command=self.toggle_six_band_mapping
+        ).pack(anchor=tk.W, padx=5, pady=5)
+        
+        weights_group = ttk.LabelFrame(parent, text="📊 频段权重")
+        weights_group.pack(fill=tk.X, padx=5, pady=5)
+        
+        band_defs = [
+            ('sub_bass', '超低频 20–60 Hz', 1.00),
+            ('bass', '低频 60–200 Hz', 0.90),
+            ('low_mid', '中低频 200–500 Hz', 0.45),
+            ('mid', '中频 500–2000 Hz', 0.15),
+            ('high_mid', '中高频 2–6 kHz', 0.55),
+            ('treble', '高频 6–16 kHz', 0.70),
+        ]
+        
+        self.band_weight_vars = {}
+        self.band_weight_labels = {}
+        
+        for band_name, display_name, default_value in band_defs:
+            row = ttk.Frame(weights_group)
+            row.pack(fill=tk.X, padx=5, pady=3)
+            
+            ttk.Label(row, text=f"{display_name}:").pack(
+                side=tk.LEFT, anchor=tk.W, padx=(0, 5)
+            )
+            var = tk.DoubleVar(value=default_value)
+            scale = ttk.Scale(
+                row,
+                from_=0.0,
+                to=1.5,
+                variable=var,
+                orient=tk.HORIZONTAL,
+                command=self.update_band_weights
+            )
+            scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            value_label = ttk.Label(row, text=f"{default_value:.2f}")
+            value_label.pack(side=tk.RIGHT)
+            
+            self.band_weight_vars[band_name] = var
+            self.band_weight_labels[band_name] = value_label
+        
+        help_label = ttk.Label(
+            weights_group,
+            text="低频主要驱动左大马达，高频主要驱动右小马达；中间频段会交叉混合。",
+            font=('Arial', 8),
+            foreground='gray'
+        )
+        help_label.pack(padx=5, pady=4)
+
     def setup_monitoring_panel(self, parent):
         """设置监控面板"""
         # 实时数据显示
@@ -886,6 +950,25 @@ class AudioVibrationGUIv2:
         self.vibration_mapper.transient_preservation = value
         self.transient_preservation_label.config(text=f"{value:.2f}")
     
+    def update_band_weights(self, event=None):
+        """更新六频段震动权重"""
+        if not hasattr(self, 'band_weight_vars'):
+            return
+        
+        weights = {}
+        for band_name, var in self.band_weight_vars.items():
+            value = var.get()
+            weights[band_name] = value
+            self.band_weight_labels[band_name].config(text=f"{value:.2f}")
+        
+        self.vibration_mapper.band_weights = weights
+    
+    def toggle_six_band_mapping(self):
+        """切换六频段加权映射"""
+        enabled = self.six_band_mapping_enabled.get()
+        self.vibration_mapper.enable_six_band_mapping = enabled
+        self.update_status(f"六频段映射已{'启用' if enabled else '禁用'}")
+    
     def update_sound_boosts(self, event=None):
         """更新声音增强参数"""
         explosion_boost = self.explosion_boost_var.get()
@@ -1099,10 +1182,19 @@ class AudioVibrationGUIv2:
         if 'transient_preservation' in params:
             self.transient_preservation_var.set(params['transient_preservation'])
         
+        # 设置六频段映射参数
+        self.six_band_mapping_enabled.set(params.get('enable_six_band_mapping', True))
+        band_weights = params.get('band_weights', {})
+        for band_name, var in self.band_weight_vars.items():
+            if band_name in band_weights:
+                var.set(band_weights[band_name])
+        
         # 更新标签
+        self.update_band_weights()
         self.update_continuous_suppression()
         self.update_dialogue_suppression()
         self.update_transient_preservation()
+        self.update_band_weights()
         self.update_sensitivity()
         self.update_thresholds_basic()
         self.update_volume_range()
@@ -1640,6 +1732,19 @@ class AudioVibrationGUIv2:
         self.vibration_mapper.midrange_dialogue_suppression = 0.30
         self.transient_preservation_var.set(1.0)
         self.vibration_mapper.transient_preservation = 1.0
+        self.six_band_mapping_enabled.set(True)
+        self.vibration_mapper.enable_six_band_mapping = True
+        default_band_weights = {
+            'sub_bass': 1.00,
+            'bass': 0.90,
+            'low_mid': 0.45,
+            'mid': 0.15,
+            'high_mid': 0.55,
+            'treble': 0.70
+        }
+        for band_name, value in default_band_weights.items():
+            self.band_weight_vars[band_name].set(value)
+        self.vibration_mapper.band_weights = default_band_weights.copy()
         self.frequency_diff_var.set(1.0)
         self.low_threshold_var.set(0.15)
         self.high_threshold_var.set(0.05)
