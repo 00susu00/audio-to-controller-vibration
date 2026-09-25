@@ -55,6 +55,10 @@ class VibrationMapper:
         self.enable_impact_enhancement = False  # 启用冲击增强
         self.enable_sound_classification = False # 启用声音分类
         self.enable_six_band_mapping = True      # 启用六频段直接震动映射
+        self.enable_sfx_gate = True              # 启用统一SFX触觉门控
+        self.sfx_gate_threshold = 0.35           # SFX分数门槛
+        self.sfx_gate_strength = 0.65            # 门控抑制强度
+        self.sfx_gate_floor = 0.20               # 低分声音最低保留比例
         self.band_weights = {
             'sub_bass': 1.00,
             'bass': 0.90,
@@ -127,6 +131,10 @@ class VibrationMapper:
             'frequency_cutoff': self.frequency_cutoff,
             'frequency_difference_factor': self.frequency_difference_factor,
             'enable_six_band_mapping': self.enable_six_band_mapping,
+            'enable_sfx_gate': self.enable_sfx_gate,
+            'sfx_gate_threshold': self.sfx_gate_threshold,
+            'sfx_gate_strength': self.sfx_gate_strength,
+            'sfx_gate_floor': self.sfx_gate_floor,
             'band_weights': self.band_weights.copy(),
             'continuous_sound_suppression': self.continuous_sound_suppression,
             'midrange_dialogue_suppression': self.midrange_dialogue_suppression,
@@ -372,6 +380,99 @@ class VibrationMapper:
         )
         return self.apply_smoothing(enhanced_left, enhanced_right)
 
+    def _calculate_sfx_score(self, sound_type, band_analysis, audio_events):
+        """计算当前声音是否值得产生触觉的统一SFX分数 (0-1)"""
+        if not band_analysis or not audio_events:
+            return 1.0
+        
+        # 第一帧没有跨帧变化信息，不做门控，避免启动瞬间被误压制
+        if not audio_events.get('has_previous_frame', False):
+            return 1.0
+        
+        energies = {
+            name: max(0.0, float(band_analysis.get(name, {}).get('rms_energy', 0.0)))
+            for name in ('sub_bass', 'bass', 'low_mid', 'mid', 'high_mid', 'treble')
+        }
+        total_energy = sum(energies.values())
+        if total_energy <= 1e-10:
+            return 0.0
+        
+        transient_score = float(np.clip(
+            abs(audio_events.get('energy_change_rate', 0.0)) / 1.5, 0.0, 1.0
+        ))
+        impact_score = float(np.clip(
+            audio_events.get('impact_intensity', 0.0), 0.0, 1.0
+        ))
+        
+        low_ratio = (energies['sub_bass'] + energies['bass']) / total_energy
+        high_ratio = (energies['high_mid'] + energies['treble']) / total_energy
+        edge_ratio = float(np.clip(max(low_ratio, high_ratio), 0.0, 1.0))
+        
+        vocal_ratio = float(np.clip(
+            (
+                energies['low_mid']
+                + energies['mid']
+                + 0.5 * energies['high_mid']
+            ) / total_energy,
+            0.0,
+            1.0
+        ))
+        steady_score = 1.0 - transient_score
+        
+        dominant_band = audio_events.get('dominant_frequency_band', 'mid')
+        dominant_bonus = 1.0 if dominant_band in (
+            'sub_bass', 'bass', 'high_mid', 'treble'
+        ) else 0.25
+        
+        score = (
+            0.45 * transient_score
+            + 0.20 * impact_score
+            + 0.20 * edge_ratio
+            + 0.15 * dominant_bonus
+            - 0.25 * steady_score * vocal_ratio
+        )
+        
+        # 已识别的典型SFX与明确冲击不应被门控层误杀
+        if sound_type != 'normal':
+            score = max(score, 0.90)
+        if audio_events.get('impact_detected', False):
+            score = max(score, 0.95)
+        
+        return float(np.clip(score, 0.0, 1.0))
+
+    def _apply_sfx_haptic_gate(
+        self, left_intensity, right_intensity, sound_type, band_analysis, audio_events
+    ):
+        """根据SFX分数衰减对白/BGM等低触觉价值声音"""
+        score = self._calculate_sfx_score(sound_type, band_analysis, audio_events)
+        
+        if not self.enable_sfx_gate:
+            return left_intensity, right_intensity, score, 1.0
+        
+        # 第一帧直接放行
+        if not audio_events or not audio_events.get('has_previous_frame', False):
+            return left_intensity, right_intensity, score, 1.0
+        
+        threshold = float(np.clip(self.sfx_gate_threshold, 0.0, 0.95))
+        strength = float(np.clip(self.sfx_gate_strength, 0.0, 1.0))
+        floor = float(np.clip(self.sfx_gate_floor, 0.0, 1.0))
+        
+        open_amount = float(np.clip(
+            (score - threshold) / max(1.0 - threshold, 1e-6), 0.0, 1.0
+        ))
+        # smoothstep，避免门槛附近发生硬切换
+        open_amount = open_amount * open_amount * (3.0 - 2.0 * open_amount)
+        
+        target_gain = floor + (1.0 - floor) * open_amount
+        gate_gain = 1.0 - strength * (1.0 - target_gain)
+        
+        return (
+            left_intensity * gate_gain,
+            right_intensity * gate_gain,
+            score,
+            gate_gain
+        )
+
     def update_controller_vibration(self, left_intensity, right_intensity, force=False):
         """更新控制器震动"""
         if self.controller_manager:
@@ -399,20 +500,31 @@ class VibrationMapper:
         band_analysis = None
         audio_events = None
         sound_type = 'normal'
+        sfx_score = 1.0
+        sfx_gate_gain = 1.0
         
         needs_audio_analysis = (
             self.enable_sound_classification
             or self.enable_impact_enhancement
             or self.enable_six_band_mapping
+            or self.enable_sfx_gate
         )
         if audio_processor and current_audio_data is not None and needs_audio_analysis:
             try:
-                # 声音分类和六频段映射都需要频段分析
-                if self.enable_sound_classification or self.enable_six_band_mapping:
+                # 声音分类、六频段映射和SFX门控都需要频段分析
+                if (
+                    self.enable_sound_classification
+                    or self.enable_six_band_mapping
+                    or self.enable_sfx_gate
+                ):
                     band_analysis = audio_processor.analyze_frequency_bands(current_audio_data)
                 
-                # 只有声音分类/冲击增强需要事件检测；六频段映射本身不额外做事件分析
-                if self.enable_sound_classification or self.enable_impact_enhancement:
+                # 声音分类、冲击增强和SFX门控需要跨帧事件特征
+                if (
+                    self.enable_sound_classification
+                    or self.enable_impact_enhancement
+                    or self.enable_sfx_gate
+                ):
                     audio_events = audio_processor.detect_audio_events(
                         current_audio_data,
                         self.previous_audio_data,
@@ -441,6 +553,21 @@ class VibrationMapper:
             )
         else:
             left_intensity, right_intensity = self.map_audio_to_vibration(volume_analysis)
+        
+        # 统一SFX触觉门控：不依赖准确分类，先判断“值不值得震”
+        if self.enable_sfx_gate and band_analysis and audio_events:
+            (
+                left_intensity,
+                right_intensity,
+                sfx_score,
+                sfx_gate_gain
+            ) = self._apply_sfx_haptic_gate(
+                left_intensity,
+                right_intensity,
+                sound_type,
+                band_analysis,
+                audio_events
+            )
         
         # 对持续、非冲击的普通声音做抑制：降低对白/BGM，优先保留瞬态SFX
         if self.enable_sound_classification and band_analysis and audio_events:
@@ -471,6 +598,8 @@ class VibrationMapper:
             'input_low_freq': volume_analysis.get('smoothed_low_rms', 0),
             'input_high_freq': volume_analysis.get('smoothed_high_rms', 0),
             'sound_type': sound_type,
+            'sfx_score': sfx_score,
+            'sfx_gate_gain': sfx_gate_gain,
             'impact_detected': audio_events.get('impact_detected', False) if audio_events else False,
             'impact_intensity': audio_events.get('impact_intensity', 0.0) if audio_events else 0.0,
             'dominant_frequency_band': audio_events.get('dominant_frequency_band', 'mid') if audio_events else 'mid'
