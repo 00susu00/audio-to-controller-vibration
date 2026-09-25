@@ -513,8 +513,40 @@ class AudioVibrationGUIv2:
         smoothing_scale = ttk.Scale(smooth_frame, from_=0.0, to=1.0, variable=self.smoothing_var, 
                                    orient=tk.HORIZONTAL, command=self.update_advanced_settings)
         smoothing_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        self.smoothing_label = ttk.Label(smooth_frame, text="0.70")
+        self.smoothing_label = ttk.Label(smooth_frame, text="0.00")
         self.smoothing_label.pack(side=tk.RIGHT)
+        
+        # Attack / Decay 响应包络
+        envelope_group = ttk.LabelFrame(parent, text="⚡ 响应包络")
+        envelope_group.pack(fill=tk.X, padx=5, pady=5)
+        
+        attack_frame = ttk.Frame(envelope_group)
+        attack_frame.pack(fill=tk.X, padx=5, pady=3)
+        ttk.Label(attack_frame, text="Attack(秒):").pack(side=tk.LEFT, anchor=tk.W, padx=(0, 5))
+        self.attack_time_var = tk.DoubleVar(value=0.01)
+        attack_scale = ttk.Scale(
+            attack_frame, from_=0.005, to=0.20,
+            variable=self.attack_time_var,
+            orient=tk.HORIZONTAL,
+            command=self.update_advanced_settings
+        )
+        attack_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.attack_time_label = ttk.Label(attack_frame, text="0.010")
+        self.attack_time_label.pack(side=tk.RIGHT)
+        
+        decay_frame = ttk.Frame(envelope_group)
+        decay_frame.pack(fill=tk.X, padx=5, pady=3)
+        ttk.Label(decay_frame, text="Decay(秒):").pack(side=tk.LEFT, anchor=tk.W, padx=(0, 5))
+        self.decay_time_var = tk.DoubleVar(value=0.10)
+        decay_scale = ttk.Scale(
+            decay_frame, from_=0.02, to=0.50,
+            variable=self.decay_time_var,
+            orient=tk.HORIZONTAL,
+            command=self.update_advanced_settings
+        )
+        decay_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.decay_time_label = ttk.Label(decay_frame, text="0.100")
+        self.decay_time_label.pack(side=tk.RIGHT)
         
         # 频率分离点
         cutoff_frame = ttk.Frame(smoothing_group)
@@ -895,11 +927,15 @@ class AudioVibrationGUIv2:
     def update_advanced_settings(self, event=None):
         """更新高级设置"""
         smoothing = self.smoothing_var.get()
+        attack_time = self.attack_time_var.get()
+        decay_time = self.decay_time_var.get()
         cutoff = self.cutoff_var.get()
         freq_diff = self.frequency_diff_var.get()
         
         # 更新震动映射器参数
         self.vibration_mapper.smoothing_factor = smoothing
+        self.vibration_mapper.attack_time = attack_time
+        self.vibration_mapper.decay_time = decay_time
         self.vibration_mapper.frequency_cutoff = int(cutoff)
         self.vibration_mapper.frequency_difference_factor = freq_diff
         
@@ -908,6 +944,8 @@ class AudioVibrationGUIv2:
             self.audio_processor.set_filter_cutoff_frequency(int(cutoff))
         
         self.smoothing_label.config(text=f"{smoothing:.2f}")
+        self.attack_time_label.config(text=f"{attack_time:.3f}")
+        self.decay_time_label.config(text=f"{decay_time:.3f}")
         self.cutoff_label.config(text=f"{int(cutoff)}")
         self.frequency_diff_label.config(text=f"{freq_diff:.2f}")
     
@@ -1033,6 +1071,8 @@ class AudioVibrationGUIv2:
         self.high_sens_var.set(params['high_freq_sensitivity'])
         self.overall_var.set(params['overall_intensity'])
         self.smoothing_var.set(params['smoothing_factor'])
+        self.attack_time_var.set(params.get('attack_time', 0.01))
+        self.decay_time_var.set(params.get('decay_time', 0.10))
         self.cutoff_var.set(params['frequency_cutoff'])
         
         # 设置阈值参数
@@ -1590,6 +1630,10 @@ class AudioVibrationGUIv2:
         self.impact_multiplier_var.set(3.0)
         self.impact_duration_var.set(0.15)
         self.energy_threshold_var.set(5.0)
+        self.attack_time_var.set(0.01)
+        self.decay_time_var.set(0.10)
+        self.vibration_mapper.attack_time = 0.01
+        self.vibration_mapper.decay_time = 0.10
         self.continuous_suppression_var.set(0.75)
         self.vibration_mapper.continuous_sound_suppression = 0.75
         self.dialogue_suppression_var.set(0.30)
