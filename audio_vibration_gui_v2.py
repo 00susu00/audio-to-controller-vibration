@@ -344,6 +344,26 @@ class AudioVibrationGUIv2:
                        variable=self.classification_enabled, 
                        command=self.toggle_classification).pack(anchor=tk.W, padx=5, pady=5)
         
+        # 持续声音抑制
+        suppression_group = ttk.LabelFrame(parent, text="🔇 持续声音抑制")
+        suppression_group.pack(fill=tk.X, padx=5, pady=5)
+        
+        suppression_frame = ttk.Frame(suppression_group)
+        suppression_frame.pack(fill=tk.X, padx=5, pady=3)
+        ttk.Label(suppression_frame, text="抑制强度:").pack(side=tk.LEFT, anchor=tk.W, padx=(0, 5))
+        self.continuous_suppression_var = tk.DoubleVar(value=0.75)
+        suppression_scale = ttk.Scale(
+            suppression_frame,
+            from_=0.0,
+            to=1.0,
+            variable=self.continuous_suppression_var,
+            orient=tk.HORIZONTAL,
+            command=self.update_continuous_suppression
+        )
+        suppression_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.continuous_suppression_label = ttk.Label(suppression_frame, text="0.75")
+        self.continuous_suppression_label.pack(side=tk.RIGHT)
+        
         # 声音类型增强设置
         enhancement_group = ttk.LabelFrame(parent, text="🔊 声音类型增强")
         enhancement_group.pack(fill=tk.X, padx=5, pady=5)
@@ -784,6 +804,12 @@ class AudioVibrationGUIv2:
         self.min_volume_label.config(text=f"{min_volume:.3f}")
         self.max_volume_label.config(text=f"{max_volume:.3f}")
     
+    def update_continuous_suppression(self, event=None):
+        """更新持续声音抑制强度"""
+        value = self.continuous_suppression_var.get()
+        self.vibration_mapper.continuous_sound_suppression = value
+        self.continuous_suppression_label.config(text=f"{value:.2f}")
+    
     def update_sound_boosts(self, event=None):
         """更新声音增强参数"""
         explosion_boost = self.explosion_boost_var.get()
@@ -981,7 +1007,12 @@ class AudioVibrationGUIv2:
         if hasattr(self.vibration_mapper, 'frequency_difference_factor'):
             self.frequency_diff_var.set(self.vibration_mapper.frequency_difference_factor)
         
+        # 设置持续声音抑制
+        if 'continuous_sound_suppression' in params:
+            self.continuous_suppression_var.set(params['continuous_sound_suppression'])
+        
         # 更新标签
+        self.update_continuous_suppression()
         self.update_sensitivity()
         self.update_thresholds_basic()
         self.update_volume_range()
@@ -1509,6 +1540,8 @@ class AudioVibrationGUIv2:
         self.impact_multiplier_var.set(3.0)
         self.impact_duration_var.set(0.15)
         self.energy_threshold_var.set(5.0)
+        self.continuous_suppression_var.set(0.75)
+        self.vibration_mapper.continuous_sound_suppression = 0.75
         self.frequency_diff_var.set(1.0)
         self.low_threshold_var.set(0.15)
         self.high_threshold_var.set(0.05)
