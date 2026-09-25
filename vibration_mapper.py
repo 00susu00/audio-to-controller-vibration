@@ -411,17 +411,20 @@ class VibrationMapper:
                 if self.enable_sound_classification or self.enable_six_band_mapping:
                     band_analysis = audio_processor.analyze_frequency_bands(current_audio_data)
                 
-                # 音频事件检测
-                audio_events = audio_processor.detect_audio_events(
-                    current_audio_data, self.previous_audio_data
-                )
+                # 只有声音分类/冲击增强需要事件检测；六频段映射本身不额外做事件分析
+                if self.enable_sound_classification or self.enable_impact_enhancement:
+                    audio_events = audio_processor.detect_audio_events(
+                        current_audio_data,
+                        self.previous_audio_data,
+                        band_analysis=band_analysis
+                    )
                 
                 # 声音分类
-                if self.enable_sound_classification and band_analysis:
+                if self.enable_sound_classification and band_analysis and audio_events:
                     sound_type = self._classify_sound_type(band_analysis, audio_events)
                 
-                # 保存当前数据用于下次对比
-                if len(current_audio_data) > 0:
+                # 只有事件检测开启时才维护上一帧，避免无意义的数据复制
+                if audio_events is not None and len(current_audio_data) > 0:
                     self.previous_audio_data = current_audio_data.copy()
                     
             except Exception as e:
