@@ -25,7 +25,11 @@
       "mid": 0.15,
       "high_mid": 0.55,
       "treble": 0.7
-    }
+    },
+    "enable_sfx_gate": true,
+    "sfx_gate_threshold": 0.35,
+    "sfx_gate_strength": 0.65,
+    "sfx_gate_floor": 0.2
   },
   "sound_classification": {
     "enabled": false,
