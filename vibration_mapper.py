@@ -600,6 +600,11 @@ class VibrationMapper:
             'sound_type': sound_type,
             'sfx_score': sfx_score,
             'sfx_gate_gain': sfx_gate_gain,
+            'frequency_bands': {
+                name: float(band_analysis.get(name, {}).get('rms_energy', 0.0))
+                if band_analysis else 0.0
+                for name in ('sub_bass', 'bass', 'low_mid', 'mid', 'high_mid', 'treble')
+            },
             'impact_detected': audio_events.get('impact_detected', False) if audio_events else False,
             'impact_intensity': audio_events.get('impact_intensity', 0.0) if audio_events else 0.0,
             'dominant_frequency_band': audio_events.get('dominant_frequency_band', 'mid') if audio_events else 'mid'
