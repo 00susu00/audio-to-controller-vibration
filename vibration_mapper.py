@@ -56,6 +56,7 @@ class VibrationMapper:
         self.enable_sound_classification = False # 启用声音分类
         self.continuous_sound_suppression = 0.75 # 持续稳定声音基础抑制
         self.midrange_dialogue_suppression = 0.30 # 中频/对白额外抑制
+        self.transient_preservation = 1.0        # 瞬态/SFX穿透抑制层的程度
         
         # 音频特征增强设置
         self.impact_multiplier = 3.0         # 冲击增强倍数
@@ -114,7 +115,8 @@ class VibrationMapper:
             'frequency_cutoff': self.frequency_cutoff,
             'frequency_difference_factor': self.frequency_difference_factor,
             'continuous_sound_suppression': self.continuous_sound_suppression,
-            'midrange_dialogue_suppression': self.midrange_dialogue_suppression
+            'midrange_dialogue_suppression': self.midrange_dialogue_suppression,
+            'transient_preservation': self.transient_preservation
         }
     
     def normalize_volume(self, volume):
@@ -502,13 +504,17 @@ class VibrationMapper:
     def _apply_continuous_sound_suppression(
         self, left_intensity, right_intensity, sound_type, band_analysis, audio_events
     ):
-        """抑制持续对白/BGM，同时尽量保留瞬态和已识别SFX"""
-        if sound_type != 'normal' or audio_events.get('impact_detected', False):
-            return left_intensity, right_intensity
-        
-        # 相邻帧能量变化越小，越像持续背景声；瞬态变化大时不抑制
+        """抑制持续对白/BGM，并按可调强度保留瞬态和已识别SFX"""
+        # 相邻帧能量变化越大，越像瞬态；已识别SFX/冲击直接视为强瞬态
         energy_change = abs(audio_events.get('energy_change_rate', 0.0))
-        steady_score = float(np.clip(1.0 - energy_change / 1.5, 0.0, 1.0))
+        transient_score = float(np.clip(energy_change / 1.5, 0.0, 1.0))
+        if sound_type != 'normal' or audio_events.get('impact_detected', False):
+            transient_score = 1.0
+        
+        # transient_preservation=1 保持瞬态完全穿透；=0 则不提供额外保护
+        steady_score = float(np.clip(
+            1.0 - self.transient_preservation * transient_score, 0.0, 1.0
+        ))
         
         # 人声/旋律通常集中在中频；中频占比越高，抑制越强
         energies = {
