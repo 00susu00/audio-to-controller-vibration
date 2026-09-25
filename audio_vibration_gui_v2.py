@@ -762,7 +762,7 @@ class AudioVibrationGUIv2:
         self.sfx_gate_gain_display.grid(row=3, column=1, sticky=tk.W, padx=10)
         
         # 频段分析
-        bands_group = ttk.LabelFrame(parent, text="📈 频段分析")
+        bands_group = ttk.LabelFrame(parent, text="📈 频段分析（柱=相对能量，数值=RMS）")
         bands_group.pack(fill=tk.X, padx=5, pady=5)
         
         self.setup_frequency_bands_display(bands_group)
@@ -1429,22 +1429,21 @@ class AudioVibrationGUIv2:
         self.update_frequency_bands_display(latest_vibration)
     
     def update_frequency_bands_display(self, vibration_status):
-        """更新频段显示"""
-        # 这里需要从audio_processor获取频段分析数据
-        # 为了演示，我们先使用模拟数据
-        bands_data = {
-            'sub_bass': vibration_status.get('left_intensity', 0) * 0.8,
-            'bass': vibration_status.get('left_intensity', 0) * 0.6,
-            'low_mid': (vibration_status.get('left_intensity', 0) + vibration_status.get('right_intensity', 0)) * 0.5,
-            'mid': (vibration_status.get('left_intensity', 0) + vibration_status.get('right_intensity', 0)) * 0.4,
-            'high_mid': vibration_status.get('right_intensity', 0) * 0.6,
-            'treble': vibration_status.get('right_intensity', 0) * 0.8
-        }
+        """用真实六频段RMS更新显示"""
+        bands_data = vibration_status.get('frequency_bands', {})
+        band_keys = ('sub_bass', 'bass', 'low_mid', 'mid', 'high_mid', 'treble')
         
-        for band_key, value in bands_data.items():
+        values = {
+            band_key: max(0.0, float(bands_data.get(band_key, 0.0)))
+            for band_key in band_keys
+        }
+        max_value = max(values.values(), default=0.0)
+        
+        for band_key, value in values.items():
             if band_key in self.band_displays:
-                self.band_displays[band_key]['progress']['value'] = value * 100
-                self.band_displays[band_key]['label'].config(text=f"{value:.2f}")
+                relative = (value / max_value) if max_value > 1e-10 else 0.0
+                self.band_displays[band_key]['progress']['value'] = relative * 100
+                self.band_displays[band_key]['label'].config(text=f"{value:.3f}")
     
     def update_charts(self):
         """更新图表"""
