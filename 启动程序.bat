@@ -21,6 +21,7 @@ exit
 :run_program
 :: 确保工作目录正确
 cd /d "%~dp0"
+call "C:\ProgramData\Miniconda3\Scripts\activate.bat" xbox-shake
 cls
 echo.
 echo ╔══════════════════════════════════════╗
@@ -58,7 +59,7 @@ echo ━━━━━━━━━━━━━━━━━━━━━━━━━
 echo.
 
 :: 启动主程序（高优先级模式）
-python main.py  --chunk-size 16
+python main.py --chunk-size 512
 
 :: 程序结束后的处理
 echo.
