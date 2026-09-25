@@ -90,8 +90,8 @@ def setup_argument_parser():
     parser.add_argument('--sample-rate', type=int, default=44100,
                        help='音频采样率（默认: 44100）')
     
-    parser.add_argument('--chunk-size', type=int, default=16,
-                       help='音频块大小（默认: 16）')
+    parser.add_argument('--chunk-size', type=int, default=512,
+                       help='音频块大小（默认: 512）')
     
     
     parser.add_argument('--no-high-priority', action='store_true',
