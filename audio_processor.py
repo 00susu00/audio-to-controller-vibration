@@ -342,7 +342,8 @@ class AudioProcessor:
             'impact_intensity': 0.0,
             'frequency_shift': 0.0,
             'energy_change_rate': 0.0,
-            'dominant_frequency_band': 'mid'
+            'dominant_frequency_band': 'mid',
+            'has_previous_frame': False
         }
         
         try:
@@ -350,6 +351,7 @@ class AudioProcessor:
             
             # 检测瞬时冲击（能量突变）
             if previous_data is not None and len(previous_data) == len(audio_data):
+                events['has_previous_frame'] = True
                 previous_energy = np.mean(previous_data**2)
                 energy_ratio = current_energy / (previous_energy + 1e-10)
                 
