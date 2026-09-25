@@ -54,6 +54,7 @@ class VibrationMapper:
         self.enable_stereo_separation = True    # 启用立体声分离
         self.enable_impact_enhancement = False  # 启用冲击增强
         self.enable_sound_classification = False # 启用声音分类
+        self.continuous_sound_suppression = 0.75 # 抑制持续对白/BGM，保留瞬态SFX
         
         # 音频特征增强设置
         self.impact_multiplier = 3.0         # 冲击增强倍数
@@ -110,7 +111,8 @@ class VibrationMapper:
             'attack_time': self.attack_time,
             'decay_time': self.decay_time,
             'frequency_cutoff': self.frequency_cutoff,
-            'frequency_difference_factor': self.frequency_difference_factor
+            'frequency_difference_factor': self.frequency_difference_factor,
+            'continuous_sound_suppression': self.continuous_sound_suppression
         }
     
     def normalize_volume(self, volume):
@@ -297,10 +299,12 @@ class VibrationMapper:
         audio_events = None
         sound_type = 'normal'
         
-        if audio_processor and current_audio_data is not None and self.enable_sound_classification:
+        needs_audio_analysis = self.enable_sound_classification or self.enable_impact_enhancement
+        if audio_processor and current_audio_data is not None and needs_audio_analysis:
             try:
-                # 多频段分析
-                band_analysis = audio_processor.analyze_frequency_bands(current_audio_data)
+                # 声音分类需要六频段分析；冲击增强单独开启时只做事件检测
+                if self.enable_sound_classification:
+                    band_analysis = audio_processor.analyze_frequency_bands(current_audio_data)
                 
                 # 音频事件检测
                 audio_events = audio_processor.detect_audio_events(
@@ -308,7 +312,8 @@ class VibrationMapper:
                 )
                 
                 # 声音分类
-                sound_type = self._classify_sound_type(band_analysis, audio_events)
+                if self.enable_sound_classification and band_analysis:
+                    sound_type = self._classify_sound_type(band_analysis, audio_events)
                 
                 # 保存当前数据用于下次对比
                 if len(current_audio_data) > 0:
@@ -325,6 +330,12 @@ class VibrationMapper:
         else:
             # 传统映射
             left_intensity, right_intensity = self.map_audio_to_vibration(volume_analysis)
+        
+        # 对持续、非冲击的普通声音做抑制：降低对白/BGM，优先保留瞬态SFX
+        if self.enable_sound_classification and band_analysis and audio_events:
+            left_intensity, right_intensity = self._apply_continuous_sound_suppression(
+                left_intensity, right_intensity, sound_type, band_analysis, audio_events
+            )
         
         # 应用冲击增强
         if self.enable_impact_enhancement and audio_events:
@@ -486,6 +497,38 @@ class VibrationMapper:
             # 普通声音：使用标准映射
             return base_left, base_right
     
+    def _apply_continuous_sound_suppression(
+        self, left_intensity, right_intensity, sound_type, band_analysis, audio_events
+    ):
+        """抑制持续对白/BGM，同时尽量保留瞬态和已识别SFX"""
+        if sound_type != 'normal' or audio_events.get('impact_detected', False):
+            return left_intensity, right_intensity
+        
+        # 相邻帧能量变化越小，越像持续背景声；瞬态变化大时不抑制
+        energy_change = abs(audio_events.get('energy_change_rate', 0.0))
+        steady_score = float(np.clip(1.0 - energy_change / 1.5, 0.0, 1.0))
+        
+        # 人声/旋律通常集中在中频；中频占比越高，抑制越强
+        energies = {
+            name: band_analysis.get(name, {}).get('rms_energy', 0.0)
+            for name in ('sub_bass', 'bass', 'low_mid', 'mid', 'high_mid', 'treble')
+        }
+        total_energy = sum(energies.values())
+        if total_energy <= 1e-10:
+            return left_intensity, right_intensity
+        
+        mid_energy = energies['low_mid'] + energies['mid'] + energies['high_mid']
+        mid_ratio = float(np.clip(mid_energy / total_energy, 0.0, 1.0))
+        
+        # 持续低频音乐也会被一定程度压制；中频主导对白会被更强地压制
+        content_score = steady_score * (0.6 + 0.4 * mid_ratio)
+        suppression = float(np.clip(
+            self.continuous_sound_suppression * content_score, 0.0, 0.9
+        ))
+        keep = 1.0 - suppression
+        
+        return left_intensity * keep, right_intensity * keep
+
     def _apply_impact_enhancement(self, left_intensity, right_intensity, audio_events):
         """应用冲击增强效果"""
         if not audio_events.get('impact_detected', False):
