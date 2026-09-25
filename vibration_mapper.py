@@ -39,8 +39,8 @@ class VibrationMapper:
         
         # 平滑和响应性参数
         self.smoothing_factor = 0.0          # 平滑因子 (0-1, 越大越平滑)
-        self.attack_time = 0.1               # 攻击时间 (秒)
-        self.decay_time = 0.5                # 衰减时间 (秒)
+        self.attack_time = 0.01              # 攻击时间 (秒)
+        self.decay_time = 0.10               # 衰减时间 (秒)
         
         # 频率分离点
         self.frequency_cutoff = 400          # Hz
@@ -82,6 +82,9 @@ class VibrationMapper:
         self.current_left_intensity = 0.0
         self.current_right_intensity = 0.0
         self.last_update_time = time.time()
+        self.envelope_left_intensity = 0.0
+        self.envelope_right_intensity = 0.0
+        self.last_envelope_time = time.time()
         
         # 使用锁保证线程安全
         self.intensity_lock = Lock()
@@ -225,6 +228,24 @@ class VibrationMapper:
             change = min(current_intensity - target_intensity, rate * time_delta)
             return current_intensity - change
     
+    def apply_attack_decay_envelope(self, left_intensity, right_intensity):
+        """对最终震动输出应用独立的 Attack/Decay 包络"""
+        current_time = time.time()
+        time_delta = max(0.0, current_time - self.last_envelope_time)
+        self.last_envelope_time = current_time
+
+        target_left = float(np.clip(left_intensity, 0.0, 1.0))
+        target_right = float(np.clip(right_intensity, 0.0, 1.0))
+
+        self.envelope_left_intensity = self.calculate_attack_decay(
+            target_left, self.envelope_left_intensity, time_delta
+        )
+        self.envelope_right_intensity = self.calculate_attack_decay(
+            target_right, self.envelope_right_intensity, time_delta
+        )
+
+        return self.envelope_left_intensity, self.envelope_right_intensity
+
     def map_audio_to_vibration(self, volume_analysis):
         """
         将音频分析结果映射到震动强度
@@ -347,6 +368,11 @@ class VibrationMapper:
                 left_intensity, right_intensity, audio_events
             )
         
+        # 对最终结果应用 Attack/Decay 包络
+        left_intensity, right_intensity = self.apply_attack_decay_envelope(
+            left_intensity, right_intensity
+        )
+
         # 更新控制器
         self.update_controller_vibration(left_intensity, right_intensity)
         
@@ -374,6 +400,9 @@ class VibrationMapper:
         with self.intensity_lock:
             self.current_left_intensity = 0.0
             self.current_right_intensity = 0.0
+            self.envelope_left_intensity = 0.0
+            self.envelope_right_intensity = 0.0
+            self.last_envelope_time = time.time()
         
         if self.controller_manager:
             self.controller_manager.set_vibration(0, 0)
