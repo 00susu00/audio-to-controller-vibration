@@ -335,7 +335,7 @@ class AudioProcessor:
         except:
             return 0.0
     
-    def detect_audio_events(self, audio_data, previous_data=None):
+    def detect_audio_events(self, audio_data, previous_data=None, band_analysis=None):
         """检测音频事件特征（冲击、渐变等）"""
         events = {
             'impact_detected': False,
@@ -363,8 +363,9 @@ class AudioProcessor:
                 
                 events['energy_change_rate'] = energy_ratio - 1.0
             
-            # 分析频段分布，找出主导频段
-            band_analysis = self.analyze_frequency_bands(audio_data)
+            # 分析频段分布，找出主导频段；已有结果时直接复用，避免重复滤波
+            if band_analysis is None:
+                band_analysis = self.analyze_frequency_bands(audio_data)
             max_energy = 0.0
             dominant_band = 'mid'
             
