@@ -14,7 +14,8 @@
     "decay_time": 0.1,
     "frequency_cutoff": 400,
     "frequency_difference_factor": 0.5,
-    "continuous_sound_suppression": 0.75
+    "continuous_sound_suppression": 0.75,
+    "midrange_dialogue_suppression": 0.3
   },
   "sound_classification": {
     "enabled": false,
