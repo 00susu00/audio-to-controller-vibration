@@ -1194,7 +1194,6 @@ class AudioVibrationGUIv2:
         self.update_continuous_suppression()
         self.update_dialogue_suppression()
         self.update_transient_preservation()
-        self.update_band_weights()
         self.update_sensitivity()
         self.update_thresholds_basic()
         self.update_volume_range()
