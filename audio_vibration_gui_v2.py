@@ -364,6 +364,22 @@ class AudioVibrationGUIv2:
         self.continuous_suppression_label = ttk.Label(suppression_frame, text="0.75")
         self.continuous_suppression_label.pack(side=tk.RIGHT)
         
+        dialogue_frame = ttk.Frame(suppression_group)
+        dialogue_frame.pack(fill=tk.X, padx=5, pady=3)
+        ttk.Label(dialogue_frame, text="中频/对白抑制:").pack(side=tk.LEFT, anchor=tk.W, padx=(0, 5))
+        self.dialogue_suppression_var = tk.DoubleVar(value=0.30)
+        dialogue_scale = ttk.Scale(
+            dialogue_frame,
+            from_=0.0,
+            to=1.0,
+            variable=self.dialogue_suppression_var,
+            orient=tk.HORIZONTAL,
+            command=self.update_dialogue_suppression
+        )
+        dialogue_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.dialogue_suppression_label = ttk.Label(dialogue_frame, text="0.30")
+        self.dialogue_suppression_label.pack(side=tk.RIGHT)
+        
         # 声音类型增强设置
         enhancement_group = ttk.LabelFrame(parent, text="🔊 声音类型增强")
         enhancement_group.pack(fill=tk.X, padx=5, pady=5)
@@ -810,6 +826,12 @@ class AudioVibrationGUIv2:
         self.vibration_mapper.continuous_sound_suppression = value
         self.continuous_suppression_label.config(text=f"{value:.2f}")
     
+    def update_dialogue_suppression(self, event=None):
+        """更新中频/对白额外抑制强度"""
+        value = self.dialogue_suppression_var.get()
+        self.vibration_mapper.midrange_dialogue_suppression = value
+        self.dialogue_suppression_label.config(text=f"{value:.2f}")
+    
     def update_sound_boosts(self, event=None):
         """更新声音增强参数"""
         explosion_boost = self.explosion_boost_var.get()
@@ -1010,9 +1032,12 @@ class AudioVibrationGUIv2:
         # 设置持续声音抑制
         if 'continuous_sound_suppression' in params:
             self.continuous_suppression_var.set(params['continuous_sound_suppression'])
+        if 'midrange_dialogue_suppression' in params:
+            self.dialogue_suppression_var.set(params['midrange_dialogue_suppression'])
         
         # 更新标签
         self.update_continuous_suppression()
+        self.update_dialogue_suppression()
         self.update_sensitivity()
         self.update_thresholds_basic()
         self.update_volume_range()
@@ -1542,6 +1567,8 @@ class AudioVibrationGUIv2:
         self.energy_threshold_var.set(5.0)
         self.continuous_suppression_var.set(0.75)
         self.vibration_mapper.continuous_sound_suppression = 0.75
+        self.dialogue_suppression_var.set(0.30)
+        self.vibration_mapper.midrange_dialogue_suppression = 0.30
         self.frequency_diff_var.set(1.0)
         self.low_threshold_var.set(0.15)
         self.high_threshold_var.set(0.05)
