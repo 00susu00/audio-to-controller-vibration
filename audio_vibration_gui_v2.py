@@ -643,6 +643,73 @@ class AudioVibrationGUIv2:
             foreground='gray'
         )
         help_label.pack(padx=5, pady=4)
+        
+        gate_group = ttk.LabelFrame(parent, text="🎮 SFX 触觉门控")
+        gate_group.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.sfx_gate_enabled = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            gate_group,
+            text="启用SFX触觉门控",
+            variable=self.sfx_gate_enabled,
+            command=self.toggle_sfx_gate
+        ).pack(anchor=tk.W, padx=5, pady=5)
+        
+        threshold_frame = ttk.Frame(gate_group)
+        threshold_frame.pack(fill=tk.X, padx=5, pady=3)
+        ttk.Label(threshold_frame, text="SFX门槛:").pack(side=tk.LEFT, anchor=tk.W, padx=(0, 5))
+        self.sfx_gate_threshold_var = tk.DoubleVar(value=0.35)
+        threshold_scale = ttk.Scale(
+            threshold_frame,
+            from_=0.0,
+            to=0.9,
+            variable=self.sfx_gate_threshold_var,
+            orient=tk.HORIZONTAL,
+            command=self.update_sfx_gate_settings
+        )
+        threshold_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.sfx_gate_threshold_label = ttk.Label(threshold_frame, text="0.35")
+        self.sfx_gate_threshold_label.pack(side=tk.RIGHT)
+        
+        strength_frame = ttk.Frame(gate_group)
+        strength_frame.pack(fill=tk.X, padx=5, pady=3)
+        ttk.Label(strength_frame, text="门控强度:").pack(side=tk.LEFT, anchor=tk.W, padx=(0, 5))
+        self.sfx_gate_strength_var = tk.DoubleVar(value=0.65)
+        strength_scale = ttk.Scale(
+            strength_frame,
+            from_=0.0,
+            to=1.0,
+            variable=self.sfx_gate_strength_var,
+            orient=tk.HORIZONTAL,
+            command=self.update_sfx_gate_settings
+        )
+        strength_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.sfx_gate_strength_label = ttk.Label(strength_frame, text="0.65")
+        self.sfx_gate_strength_label.pack(side=tk.RIGHT)
+        
+        floor_frame = ttk.Frame(gate_group)
+        floor_frame.pack(fill=tk.X, padx=5, pady=3)
+        ttk.Label(floor_frame, text="最低保留:").pack(side=tk.LEFT, anchor=tk.W, padx=(0, 5))
+        self.sfx_gate_floor_var = tk.DoubleVar(value=0.20)
+        floor_scale = ttk.Scale(
+            floor_frame,
+            from_=0.0,
+            to=1.0,
+            variable=self.sfx_gate_floor_var,
+            orient=tk.HORIZONTAL,
+            command=self.update_sfx_gate_settings
+        )
+        floor_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.sfx_gate_floor_label = ttk.Label(floor_frame, text="0.20")
+        self.sfx_gate_floor_label.pack(side=tk.RIGHT)
+        
+        gate_help = ttk.Label(
+            gate_group,
+            text="分数越低越像对白/BGM；分数越高越像枪声、爆炸、碰撞等值得产生触觉的声音。",
+            font=('Arial', 8),
+            foreground='gray'
+        )
+        gate_help.pack(padx=5, pady=4)
 
     def setup_monitoring_panel(self, parent):
         """设置监控面板"""
@@ -685,6 +752,14 @@ class AudioVibrationGUIv2:
         ttk.Label(recognition_frame, text="冲击状态:", style='Data.TLabel').grid(row=1, column=0, sticky=tk.W)
         self.impact_status_display = ttk.Label(recognition_frame, text="❌ 无冲击", style='Data.TLabel')
         self.impact_status_display.grid(row=1, column=1, sticky=tk.W, padx=10)
+        
+        ttk.Label(recognition_frame, text="SFX分数:", style='Data.TLabel').grid(row=2, column=0, sticky=tk.W)
+        self.sfx_score_display = ttk.Label(recognition_frame, text="1.00", style='Data.TLabel')
+        self.sfx_score_display.grid(row=2, column=1, sticky=tk.W, padx=10)
+        
+        ttk.Label(recognition_frame, text="门控增益:", style='Data.TLabel').grid(row=3, column=0, sticky=tk.W)
+        self.sfx_gate_gain_display = ttk.Label(recognition_frame, text="1.00", style='Data.TLabel')
+        self.sfx_gate_gain_display.grid(row=3, column=1, sticky=tk.W, padx=10)
         
         # 频段分析
         bands_group = ttk.LabelFrame(parent, text="📈 频段分析")
@@ -969,6 +1044,26 @@ class AudioVibrationGUIv2:
         self.vibration_mapper.enable_six_band_mapping = enabled
         self.update_status(f"六频段映射已{'启用' if enabled else '禁用'}")
     
+    def update_sfx_gate_settings(self, event=None):
+        """更新SFX触觉门控参数"""
+        threshold = self.sfx_gate_threshold_var.get()
+        strength = self.sfx_gate_strength_var.get()
+        floor = self.sfx_gate_floor_var.get()
+        
+        self.vibration_mapper.sfx_gate_threshold = threshold
+        self.vibration_mapper.sfx_gate_strength = strength
+        self.vibration_mapper.sfx_gate_floor = floor
+        
+        self.sfx_gate_threshold_label.config(text=f"{threshold:.2f}")
+        self.sfx_gate_strength_label.config(text=f"{strength:.2f}")
+        self.sfx_gate_floor_label.config(text=f"{floor:.2f}")
+    
+    def toggle_sfx_gate(self):
+        """切换SFX触觉门控"""
+        enabled = self.sfx_gate_enabled.get()
+        self.vibration_mapper.enable_sfx_gate = enabled
+        self.update_status(f"SFX触觉门控已{'启用' if enabled else '禁用'}")
+    
     def update_sound_boosts(self, event=None):
         """更新声音增强参数"""
         explosion_boost = self.explosion_boost_var.get()
@@ -1189,8 +1284,15 @@ class AudioVibrationGUIv2:
             if band_name in band_weights:
                 var.set(band_weights[band_name])
         
+        # 设置SFX触觉门控参数
+        self.sfx_gate_enabled.set(params.get('enable_sfx_gate', True))
+        self.sfx_gate_threshold_var.set(params.get('sfx_gate_threshold', 0.35))
+        self.sfx_gate_strength_var.set(params.get('sfx_gate_strength', 0.65))
+        self.sfx_gate_floor_var.set(params.get('sfx_gate_floor', 0.20))
+        
         # 更新标签
         self.update_band_weights()
+        self.update_sfx_gate_settings()
         self.update_continuous_suppression()
         self.update_dialogue_suppression()
         self.update_transient_preservation()
@@ -1317,6 +1419,11 @@ class AudioVibrationGUIv2:
         
         impact_text = "🔥 冲击中!" if impact_detected else "❌ 无冲击"
         self.impact_status_display.config(text=impact_text)
+        
+        sfx_score = latest_vibration.get('sfx_score', 1.0)
+        sfx_gate_gain = latest_vibration.get('sfx_gate_gain', 1.0)
+        self.sfx_score_display.config(text=f"{sfx_score:.2f}")
+        self.sfx_gate_gain_display.config(text=f"{sfx_gate_gain:.2f}")
         
         # 更新频段显示
         self.update_frequency_bands_display(latest_vibration)
@@ -1733,6 +1840,14 @@ class AudioVibrationGUIv2:
         self.vibration_mapper.transient_preservation = 1.0
         self.six_band_mapping_enabled.set(True)
         self.vibration_mapper.enable_six_band_mapping = True
+        self.sfx_gate_enabled.set(True)
+        self.vibration_mapper.enable_sfx_gate = True
+        self.sfx_gate_threshold_var.set(0.35)
+        self.sfx_gate_strength_var.set(0.65)
+        self.sfx_gate_floor_var.set(0.20)
+        self.vibration_mapper.sfx_gate_threshold = 0.35
+        self.vibration_mapper.sfx_gate_strength = 0.65
+        self.vibration_mapper.sfx_gate_floor = 0.20
         default_band_weights = {
             'sub_bass': 1.00,
             'bass': 0.90,
