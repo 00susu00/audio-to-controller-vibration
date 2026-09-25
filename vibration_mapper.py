@@ -54,7 +54,8 @@ class VibrationMapper:
         self.enable_stereo_separation = True    # 启用立体声分离
         self.enable_impact_enhancement = False  # 启用冲击增强
         self.enable_sound_classification = False # 启用声音分类
-        self.continuous_sound_suppression = 0.75 # 抑制持续对白/BGM，保留瞬态SFX
+        self.continuous_sound_suppression = 0.75 # 持续稳定声音基础抑制
+        self.midrange_dialogue_suppression = 0.30 # 中频/对白额外抑制
         
         # 音频特征增强设置
         self.impact_multiplier = 3.0         # 冲击增强倍数
@@ -112,7 +113,8 @@ class VibrationMapper:
             'decay_time': self.decay_time,
             'frequency_cutoff': self.frequency_cutoff,
             'frequency_difference_factor': self.frequency_difference_factor,
-            'continuous_sound_suppression': self.continuous_sound_suppression
+            'continuous_sound_suppression': self.continuous_sound_suppression,
+            'midrange_dialogue_suppression': self.midrange_dialogue_suppression
         }
     
     def normalize_volume(self, volume):
@@ -520,10 +522,14 @@ class VibrationMapper:
         mid_energy = energies['low_mid'] + energies['mid'] + energies['high_mid']
         mid_ratio = float(np.clip(mid_energy / total_energy, 0.0, 1.0))
         
-        # 持续低频音乐也会被一定程度压制；中频主导对白会被更强地压制
-        content_score = steady_score * (0.6 + 0.4 * mid_ratio)
+        # 基础抑制负责持续稳定声音；额外中频抑制负责对白/旋律密集区域。
+        # 默认 0.75 / 0.30 与上一版的默认曲线保持近似一致。
+        base_suppression = self.continuous_sound_suppression * steady_score * 0.6
+        dialogue_suppression = (
+            self.midrange_dialogue_suppression * steady_score * mid_ratio
+        )
         suppression = float(np.clip(
-            self.continuous_sound_suppression * content_score, 0.0, 0.9
+            base_suppression + dialogue_suppression, 0.0, 0.9
         ))
         keep = 1.0 - suppression
         
