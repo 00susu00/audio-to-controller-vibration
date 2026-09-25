@@ -819,7 +819,8 @@ class AudioVibrationGUIv2:
         """更新检测设置"""
         energy_thresh = self.energy_threshold_var.get()
         self.energy_threshold_label.config(text=f"{energy_thresh:.2f}")
-        # 注意：这个参数需要传递给audio_processor的detect_audio_events方法
+        if hasattr(self, 'audio_processor') and self.audio_processor:
+            self.audio_processor.set_impact_energy_threshold(energy_thresh)
     
     def update_advanced_settings(self, event=None):
         """更新高级设置"""
