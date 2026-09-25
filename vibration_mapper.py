@@ -54,6 +54,15 @@ class VibrationMapper:
         self.enable_stereo_separation = True    # 启用立体声分离
         self.enable_impact_enhancement = False  # 启用冲击增强
         self.enable_sound_classification = False # 启用声音分类
+        self.enable_six_band_mapping = True      # 启用六频段直接震动映射
+        self.band_weights = {
+            'sub_bass': 1.00,
+            'bass': 0.90,
+            'low_mid': 0.45,
+            'mid': 0.15,
+            'high_mid': 0.55,
+            'treble': 0.70
+        }
         self.continuous_sound_suppression = 0.75 # 持续稳定声音基础抑制
         self.midrange_dialogue_suppression = 0.30 # 中频/对白额外抑制
         self.transient_preservation = 1.0        # 瞬态/SFX穿透抑制层的程度
@@ -117,6 +126,8 @@ class VibrationMapper:
             'decay_time': self.decay_time,
             'frequency_cutoff': self.frequency_cutoff,
             'frequency_difference_factor': self.frequency_difference_factor,
+            'enable_six_band_mapping': self.enable_six_band_mapping,
+            'band_weights': self.band_weights.copy(),
             'continuous_sound_suppression': self.continuous_sound_suppression,
             'midrange_dialogue_suppression': self.midrange_dialogue_suppression,
             'transient_preservation': self.transient_preservation
@@ -296,6 +307,71 @@ class VibrationMapper:
         
         return smoothed_left, smoothed_right
     
+    def map_frequency_bands_to_vibration(self, band_analysis):
+        """将六频段能量按权重合成为左右两颗 XInput 马达"""
+        if not band_analysis:
+            return 0.0, 0.0
+
+        energies = {
+            band: max(0.0, float(band_analysis.get(band, {}).get('rms_energy', 0.0)))
+            for band in ('sub_bass', 'bass', 'low_mid', 'mid', 'high_mid', 'treble')
+        }
+
+        # 左马达偏低频，右马达偏高频；交界频段保留少量交叉馈送。
+        left_mix = {
+            'sub_bass': 1.00,
+            'bass': 1.00,
+            'low_mid': 0.75,
+            'mid': 0.25,
+            'high_mid': 0.05,
+            'treble': 0.00
+        }
+        right_mix = {
+            'sub_bass': 0.00,
+            'bass': 0.10,
+            'low_mid': 0.35,
+            'mid': 0.65,
+            'high_mid': 1.00,
+            'treble': 1.00
+        }
+
+        left_energy_sq = 0.0
+        right_energy_sq = 0.0
+        for band, energy in energies.items():
+            weight = max(0.0, float(self.band_weights.get(band, 1.0)))
+            weighted_energy = energy * weight
+            left_energy_sq += (weighted_energy * left_mix[band]) ** 2
+            right_energy_sq += (weighted_energy * right_mix[band]) ** 2
+
+        left_energy = np.sqrt(left_energy_sq)
+        right_energy = np.sqrt(right_energy_sq)
+
+        filtered_low = left_energy if left_energy >= self.min_low_freq_threshold else 0.0
+        filtered_high = right_energy if right_energy >= self.min_high_freq_threshold else 0.0
+
+        normalized_low = self.normalize_volume(filtered_low)
+        normalized_high = self.normalize_volume(filtered_high)
+
+        adjusted_low = normalized_low * self.low_freq_sensitivity
+        adjusted_high = normalized_high * self.high_freq_sensitivity
+        enhanced_low, enhanced_high = self.apply_frequency_boost(adjusted_low, adjusted_high)
+
+        left_intensity = np.clip(
+            enhanced_low * self.overall_intensity,
+            self.min_vibration_intensity,
+            self.max_vibration_intensity
+        )
+        right_intensity = np.clip(
+            enhanced_high * self.overall_intensity,
+            self.min_vibration_intensity,
+            self.max_vibration_intensity
+        )
+
+        enhanced_left, enhanced_right = self.apply_frequency_difference(
+            left_intensity, right_intensity
+        )
+        return self.apply_smoothing(enhanced_left, enhanced_right)
+
     def update_controller_vibration(self, left_intensity, right_intensity, force=False):
         """更新控制器震动"""
         if self.controller_manager:
@@ -324,11 +400,15 @@ class VibrationMapper:
         audio_events = None
         sound_type = 'normal'
         
-        needs_audio_analysis = self.enable_sound_classification or self.enable_impact_enhancement
+        needs_audio_analysis = (
+            self.enable_sound_classification
+            or self.enable_impact_enhancement
+            or self.enable_six_band_mapping
+        )
         if audio_processor and current_audio_data is not None and needs_audio_analysis:
             try:
-                # 声音分类需要六频段分析；冲击增强单独开启时只做事件检测
-                if self.enable_sound_classification:
+                # 声音分类和六频段映射都需要频段分析
+                if self.enable_sound_classification or self.enable_six_band_mapping:
                     band_analysis = audio_processor.analyze_frequency_bands(current_audio_data)
                 
                 # 音频事件检测
@@ -347,13 +427,16 @@ class VibrationMapper:
             except Exception as e:
                 print(f"高级音频分析错误: {e}")
         
-        # 基于声音类型的智能映射
+        # 基础映射：优先使用六频段；关闭后回退到原来的低/高频映射
         if self.enable_sound_classification and band_analysis and audio_events:
             left_intensity, right_intensity = self._intelligent_vibration_mapping(
                 sound_type, band_analysis, audio_events, volume_analysis
             )
+        elif self.enable_six_band_mapping and band_analysis:
+            left_intensity, right_intensity = self.map_frequency_bands_to_vibration(
+                band_analysis
+            )
         else:
-            # 传统映射
             left_intensity, right_intensity = self.map_audio_to_vibration(volume_analysis)
         
         # 对持续、非冲击的普通声音做抑制：降低对白/BGM，优先保留瞬态SFX
@@ -463,8 +546,11 @@ class VibrationMapper:
         high_freq_rms = volume_analysis.get('smoothed_high_rms', 0)
         total_rms = volume_analysis.get('smoothed_total_rms', 0)
         
-        # 基础映射
-        base_left, base_right = self.map_audio_to_vibration(volume_analysis)
+        # 基础映射：六频段开启时以六频段结果作为智能分类的底座
+        if self.enable_six_band_mapping and band_analysis:
+            base_left, base_right = self.map_frequency_bands_to_vibration(band_analysis)
+        else:
+            base_left, base_right = self.map_audio_to_vibration(volume_analysis)
         
         # 根据声音类型调整映射
         if sound_type == 'explosion':
