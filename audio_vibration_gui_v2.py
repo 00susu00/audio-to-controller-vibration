@@ -689,7 +689,7 @@ class AudioVibrationGUIv2:
         
         floor_frame = ttk.Frame(gate_group)
         floor_frame.pack(fill=tk.X, padx=5, pady=3)
-        ttk.Label(floor_frame, text="最低保留:").pack(side=tk.LEFT, anchor=tk.W, padx=(0, 5))
+        ttk.Label(floor_frame, text="最低保留(满强度):").pack(side=tk.LEFT, anchor=tk.W, padx=(0, 5))
         self.sfx_gate_floor_var = tk.DoubleVar(value=0.20)
         floor_scale = ttk.Scale(
             floor_frame,
