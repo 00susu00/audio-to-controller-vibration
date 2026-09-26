@@ -57,14 +57,15 @@ class AudioProcessor:
             'treble': (6000, 16000)    # 高频：金属声、尖锐音
         }
         
-        # 为每个频段创建滤波器
+        # 为每个频段创建适合实时流处理的SOS滤波器
         self.band_filters = {}
         for band_name, (low_freq, high_freq) in self.frequency_bands.items():
             self.band_filters[band_name] = self._create_bandpass_filter(low_freq, high_freq)
         
-        # 保持原有的简单低通/高通滤波器用于兼容
-        self.lowpass_filter = self._create_lowpass_filter(300)  
+        # 简单低通/高通也使用SOS，避免每个音频块独立filtfilt产生边界伪影
+        self.lowpass_filter = self._create_lowpass_filter(300)
         self.highpass_filter = self._create_highpass_filter(300)
+        self._reset_filter_states()
         
         # 音量分析窗口
         self.volume_buffer = []
@@ -75,6 +76,26 @@ class AudioProcessor:
         self.event_energy_baseline = None
         self.event_flux_baseline = None
         self.event_prev_spectrum = None
+    
+    def _reset_filter_states(self):
+        """重置所有实时SOS滤波器状态"""
+        self.lowpass_filter_state = None
+        self.highpass_filter_state = None
+        self.band_filter_states = {
+            band_name: None for band_name in self.band_filters
+        }
+    
+    def _apply_stateful_sos_filter(self, sos, audio_data, state):
+        """对连续音频块应用有状态SOS滤波"""
+        if audio_data is None or len(audio_data) == 0:
+            return np.asarray(audio_data), state
+        
+        if state is None:
+            # 以首个样本初始化稳态，降低在流启动/切换设备时的滤波器瞬态
+            state = signal.sosfilt_zi(sos) * float(audio_data[0])
+        
+        filtered, new_state = signal.sosfilt(sos, audio_data, zi=state)
+        return filtered, new_state
     
     def _calculate_spectral_flux(self, audio_data):
         """计算归一化正向频谱通量，返回(通量, 是否存在上一帧频谱)"""
@@ -98,21 +119,19 @@ class AudioProcessor:
         return spectral_flux, True
     
     def _create_lowpass_filter(self, cutoff_freq):
-        """创建低通滤波器"""
+        """创建低通SOS滤波器"""
         nyquist = self.sample_rate / 2
         normalized_cutoff = cutoff_freq / nyquist
-        b, a = signal.butter(4, normalized_cutoff, btype='low')
-        return (b, a)
+        return signal.butter(4, normalized_cutoff, btype='low', output='sos')
     
     def _create_highpass_filter(self, cutoff_freq):
-        """创建高通滤波器"""
+        """创建高通SOS滤波器"""
         nyquist = self.sample_rate / 2
         normalized_cutoff = cutoff_freq / nyquist
-        b, a = signal.butter(4, normalized_cutoff, btype='high')
-        return (b, a)
+        return signal.butter(4, normalized_cutoff, btype='high', output='sos')
     
     def _create_bandpass_filter(self, low_freq, high_freq):
-        """创建带通滤波器"""
+        """创建带通SOS滤波器"""
         nyquist = self.sample_rate / 2
         low_normalized = low_freq / nyquist
         high_normalized = high_freq / nyquist
@@ -122,10 +141,14 @@ class AudioProcessor:
         high_normalized = max(0.001, min(0.999, high_normalized))
         
         if low_normalized >= high_normalized:
-            high_normalized = low_normalized + 0.01
-            
-        b, a = signal.butter(4, [low_normalized, high_normalized], btype='band')
-        return (b, a)
+            high_normalized = min(0.999, low_normalized + 0.01)
+        
+        return signal.butter(
+            4,
+            [low_normalized, high_normalized],
+            btype='band',
+            output='sos'
+        )
     
     def get_audio_devices(self):
         """获取可用的音频设备列表"""
@@ -192,6 +215,7 @@ class AudioProcessor:
         
         try:
             self._reset_event_detection_state()
+            self._reset_filter_states()
             
             if not self.audio:
                 self.audio = pyaudio.PyAudio()
@@ -268,40 +292,38 @@ class AudioProcessor:
         return freqs, magnitude
     
     def separate_frequency_bands(self, audio_data):
-        """分离低频和高频信号"""
-        # 使用高质量滤波
-        # 应用低通滤波器获得低频信号
-        low_freq_signal = signal.filtfilt(
-            self.lowpass_filter[0], 
-            self.lowpass_filter[1], 
-            audio_data
+        """使用有状态SOS滤波器连续分离低频和高频信号"""
+        low_freq_signal, self.lowpass_filter_state = self._apply_stateful_sos_filter(
+            self.lowpass_filter,
+            audio_data,
+            self.lowpass_filter_state
         )
-        
-        # 应用高通滤波器获得高频信号
-        high_freq_signal = signal.filtfilt(
-            self.highpass_filter[0], 
-            self.highpass_filter[1], 
-            audio_data
+        high_freq_signal, self.highpass_filter_state = self._apply_stateful_sos_filter(
+            self.highpass_filter,
+            audio_data,
+            self.highpass_filter_state
         )
-        
         return low_freq_signal, high_freq_signal
     
     
     def analyze_frequency_bands(self, audio_data):
-        """分析多个频段的音频能量"""
+        """使用跨音频块保持状态的SOS滤波器分析六个频段"""
         band_analysis = {}
         
-        for band_name, filter_coeffs in self.band_filters.items():
+        for band_name, sos in self.band_filters.items():
             try:
-                # 应用带通滤波器
-                # 使用高质量滤波
-                band_signal = signal.filtfilt(filter_coeffs[0], filter_coeffs[1], audio_data)
+                band_signal, new_state = self._apply_stateful_sos_filter(
+                    sos,
+                    audio_data,
+                    self.band_filter_states.get(band_name)
+                )
+                self.band_filter_states[band_name] = new_state
                 
-                # 计算该频段的RMS能量
+                # 计算该频段的RMS能量和峰值
                 rms_energy = np.sqrt(np.mean(band_signal**2))
                 peak_energy = np.max(np.abs(band_signal))
                 
-                # 计算频谱特征
+                # 保留原有频谱特征输出
                 spectral_centroid = self._calculate_spectral_centroid(band_signal)
                 spectral_rolloff = self._calculate_spectral_rolloff(band_signal)
                 
@@ -314,7 +336,7 @@ class AudioProcessor:
                 }
                 
             except Exception as e:
-                # 如果滤波失败，使用零值
+                print(f"频段 {band_name} 实时滤波错误: {e}")
                 band_analysis[band_name] = {
                     'rms_energy': 0.0,
                     'peak_energy': 0.0,
@@ -571,9 +593,11 @@ class AudioProcessor:
         }
     
     def set_filter_cutoff_frequency(self, cutoff_freq):
-        """设置滤波器截止频率"""
+        """设置滤波器截止频率，并重置对应实时滤波状态"""
         self.lowpass_filter = self._create_lowpass_filter(cutoff_freq)
         self.highpass_filter = self._create_highpass_filter(cutoff_freq)
+        self.lowpass_filter_state = None
+        self.highpass_filter_state = None
 
     def set_impact_energy_threshold(self, threshold):
         """设置冲击检测的能量倍数阈值"""
