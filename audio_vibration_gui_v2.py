@@ -1508,8 +1508,8 @@ class AudioVibrationGUIv2:
         # 更新震动数据
         left_intensity = latest_vibration.get('left_intensity', 0)
         right_intensity = latest_vibration.get('right_intensity', 0)
-        left_motor_value = int(left_intensity * 65535)
-        right_motor_value = int(right_intensity * 65535)
+        left_motor_value = int(round(left_intensity * 65535))
+        right_motor_value = int(round(right_intensity * 65535))
         
         self.left_motor_display.config(text=f"{left_motor_value} ({left_intensity*100:.1f}%)")
         self.right_motor_display.config(text=f"{right_motor_value} ({right_intensity*100:.1f}%)")
