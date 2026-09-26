@@ -30,6 +30,13 @@ class ControllerManager:
         self.current_right_motor = 0
         self.last_vibration_time = time.time()
         
+        # 游戏原生震动反馈（由虚拟手柄/反馈回调写入）
+        self.game_feedback_lock = Lock()
+        self.game_feedback_left = 0.0
+        self.game_feedback_right = 0.0
+        self.game_feedback_source = None
+        self.last_game_feedback_time = 0.0
+        
         # 安全参数
         self.max_continuous_vibration_time = 30  # 最大连续震动时间（秒）
         self.vibration_start_time = None
@@ -194,6 +201,68 @@ class ControllerManager:
             print(f"设置震动失败: {e}")
             return False
     
+    def update_game_vibration_feedback(
+        self, large_motor, small_motor, max_value=255, source='external'
+    ):
+        """
+        写入游戏原生震动反馈。
+        
+        可直接接收ViGEm/vgamepad回调中的large/small motor值；
+        也可由其他反馈源调用。该状态与本程序实际发送的震动分开保存。
+        """
+        scale = max(float(max_value), 1.0)
+        left = max(0.0, min(1.0, float(large_motor) / scale))
+        right = max(0.0, min(1.0, float(small_motor) / scale))
+        
+        with self.game_feedback_lock:
+            self.game_feedback_left = left
+            self.game_feedback_right = right
+            self.game_feedback_source = source
+            self.last_game_feedback_time = time.time()
+    
+    def handle_virtual_gamepad_feedback(
+        self, client, target, large_motor, small_motor, led_number, user_data
+    ):
+        """ViGEm/vgamepad兼容的震动反馈回调"""
+        self.update_game_vibration_feedback(
+            large_motor,
+            small_motor,
+            max_value=255,
+            source='virtual_x360'
+        )
+    
+    def clear_game_vibration_feedback(self):
+        """清空游戏原生震动反馈状态"""
+        with self.game_feedback_lock:
+            self.game_feedback_left = 0.0
+            self.game_feedback_right = 0.0
+            self.game_feedback_source = None
+            self.last_game_feedback_time = 0.0
+    
+    def get_game_vibration_feedback(self, timeout=0.18):
+        """读取最近的游戏震动反馈；超时后自动视为无原生震动"""
+        current_time = time.time()
+        with self.game_feedback_lock:
+            age = (
+                current_time - self.last_game_feedback_time
+                if self.last_game_feedback_time > 0
+                else float('inf')
+            )
+            fresh = age <= max(float(timeout), 0.0)
+            left = self.game_feedback_left if fresh else 0.0
+            right = self.game_feedback_right if fresh else 0.0
+            source = self.game_feedback_source if fresh else None
+        
+        strength = max(left, right)
+        return {
+            'left_intensity': left,
+            'right_intensity': right,
+            'strength': strength,
+            'active': fresh and strength > 0.01,
+            'age': age,
+            'source': source
+        }
+    
     def stop_vibration(self, force=False):
         """停止所有震动"""
         return self.set_vibration(0, 0, force=force)
@@ -319,6 +388,7 @@ class ControllerManager:
     def cleanup(self):
         """清理资源"""
         print("清理控制器资源...")
+        self.clear_game_vibration_feedback()
         self.emergency_stop()
         # XInput库不需要显式关闭连接
         print("控制器资源清理完成")
