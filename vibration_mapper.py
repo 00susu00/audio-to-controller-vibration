@@ -410,7 +410,12 @@ class VibrationMapper:
             return 0.0, default_components
         
         transient_score = float(np.clip(
-            abs(audio_events.get('energy_change_rate', 0.0)) / 1.5, 0.0, 1.0
+            audio_events.get(
+                'transient_score',
+                abs(audio_events.get('energy_change_rate', 0.0)) / 1.5
+            ),
+            0.0,
+            1.0
         ))
         impact_score = float(np.clip(
             audio_events.get('impact_intensity', 0.0), 0.0, 1.0
@@ -651,6 +656,13 @@ class VibrationMapper:
             },
             'impact_detected': audio_events.get('impact_detected', False) if audio_events else False,
             'impact_intensity': audio_events.get('impact_intensity', 0.0) if audio_events else 0.0,
+            'transient_detector': {
+                'energy_ratio': audio_events.get('energy_ratio', 1.0) if audio_events else 1.0,
+                'energy_onset_score': audio_events.get('energy_onset_score', 0.0) if audio_events else 0.0,
+                'spectral_flux': audio_events.get('spectral_flux', 0.0) if audio_events else 0.0,
+                'spectral_flux_score': audio_events.get('spectral_flux_score', 0.0) if audio_events else 0.0,
+                'transient_score': audio_events.get('transient_score', 0.0) if audio_events else 0.0
+            },
             'dominant_frequency_band': audio_events.get('dominant_frequency_band', 'mid') if audio_events else 'mid'
         }
     
@@ -801,9 +813,15 @@ class VibrationMapper:
         self, left_intensity, right_intensity, sound_type, band_analysis, audio_events
     ):
         """抑制持续对白/BGM，并按可调强度保留瞬态和已识别SFX"""
-        # 相邻帧能量变化越大，越像瞬态；已识别SFX/冲击直接视为强瞬态
-        energy_change = abs(audio_events.get('energy_change_rate', 0.0))
-        transient_score = float(np.clip(energy_change / 1.5, 0.0, 1.0))
+        # 使用联合瞬态检测结果；旧数据缺少该字段时回退到相邻帧能量变化
+        transient_score = float(np.clip(
+            audio_events.get(
+                'transient_score',
+                abs(audio_events.get('energy_change_rate', 0.0)) / 1.5
+            ),
+            0.0,
+            1.0
+        ))
         if sound_type != 'normal' or audio_events.get('impact_detected', False):
             transient_score = 1.0
         
