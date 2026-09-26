@@ -64,7 +64,7 @@ class VibrationMapper:
         self.enable_game_feedback_ducking = True
         self.game_feedback_ducking_strength = 0.75
         self.game_feedback_audio_floor = 0.20
-        self.game_feedback_timeout = 0.18
+        self.game_feedback_timeout = None          # 由反馈源发送0明确结束震动
         self.game_feedback_passthrough = True
         self.band_weights = {
             'sub_bass': 1.00,
@@ -757,8 +757,8 @@ class VibrationMapper:
         return {
             'left_intensity': left_intensity,
             'right_intensity': right_intensity,
-            'left_motor_value': int(left_intensity * 65535),
-            'right_motor_value': int(right_intensity * 65535),
+            'left_motor_value': int(round(left_intensity * 65535)),
+            'right_motor_value': int(round(right_intensity * 65535)),
             'input_low_freq': volume_analysis.get('smoothed_low_rms', 0),
             'input_high_freq': volume_analysis.get('smoothed_high_rms', 0),
             'sound_type': sound_type,
