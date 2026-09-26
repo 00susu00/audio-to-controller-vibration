@@ -33,7 +33,7 @@
     "enable_game_feedback_ducking": true,
     "game_feedback_ducking_strength": 0.75,
     "game_feedback_audio_floor": 0.2,
-    "game_feedback_timeout": 0.18,
+    "game_feedback_timeout": null,
     "game_feedback_passthrough": true
   },
   "sound_classification": {
