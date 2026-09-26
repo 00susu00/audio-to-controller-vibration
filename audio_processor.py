@@ -57,6 +57,20 @@ class AudioProcessor:
             'treble': (6000, 16000)    # 高频：金属声、尖锐音
         }
         
+        # 各频段能量包络的Attack/Decay时间常数（秒）。
+        # 低频需要更长观察时间，高频则保持更快响应。
+        self.band_energy_time_constants = {
+            'sub_bass': (0.045, 0.140),
+            'bass': (0.030, 0.100),
+            'low_mid': (0.020, 0.070),
+            'mid': (0.015, 0.050),
+            'high_mid': (0.010, 0.035),
+            'treble': (0.008, 0.025)
+        }
+        self.band_energy_power = {
+            band_name: None for band_name in self.frequency_bands
+        }
+        
         # 为每个频段创建适合实时流处理的SOS滤波器
         self.band_filters = {}
         for band_name, (low_freq, high_freq) in self.frequency_bands.items():
@@ -78,12 +92,34 @@ class AudioProcessor:
         self.event_prev_spectrum = None
     
     def _reset_filter_states(self):
-        """重置所有实时SOS滤波器状态"""
+        """重置所有实时SOS滤波器与频段能量包络状态"""
         self.lowpass_filter_state = None
         self.highpass_filter_state = None
         self.band_filter_states = {
             band_name: None for band_name in self.band_filters
         }
+        self.band_energy_power = {
+            band_name: None for band_name in self.frequency_bands
+        }
+    
+    def _smooth_band_energy(self, band_name, instant_power, frame_count):
+        """按频段时间常数平滑功率，低频长观察、高频快响应"""
+        previous_power = self.band_energy_power.get(band_name)
+        if previous_power is None:
+            self.band_energy_power[band_name] = instant_power
+            return instant_power
+        
+        attack_tau, decay_tau = self.band_energy_time_constants[band_name]
+        tau = attack_tau if instant_power >= previous_power else decay_tau
+        duration = max(float(frame_count) / float(self.sample_rate), 1e-6)
+        alpha = 1.0 - np.exp(-duration / max(tau, 1e-6))
+        
+        smoothed_power = (
+            previous_power
+            + alpha * (instant_power - previous_power)
+        )
+        self.band_energy_power[band_name] = smoothed_power
+        return smoothed_power
     
     def _apply_stateful_sos_filter(self, sos, audio_data, state):
         """对连续音频块应用有状态SOS滤波"""
@@ -319,9 +355,20 @@ class AudioProcessor:
                 )
                 self.band_filter_states[band_name] = new_state
                 
-                # 计算该频段的RMS能量和峰值
-                rms_energy = np.sqrt(np.mean(band_signal**2))
-                peak_energy = np.max(np.abs(band_signal))
+                # 当前块的瞬时功率/RMS
+                instant_power = float(np.mean(band_signal**2))
+                instant_rms_energy = float(np.sqrt(max(instant_power, 0.0)))
+                peak_energy = float(np.max(np.abs(band_signal)))
+                
+                # 使用各频段不同时间常数平滑功率，再转回RMS。
+                # 这样20–60Hz不会被11.6ms短块的相位位置强烈影响，
+                # 高频仍保持较快的触觉响应。
+                smoothed_power = self._smooth_band_energy(
+                    band_name,
+                    instant_power,
+                    len(audio_data)
+                )
+                rms_energy = float(np.sqrt(max(smoothed_power, 0.0)))
                 
                 # 保留原有频谱特征输出
                 spectral_centroid = self._calculate_spectral_centroid(band_signal)
@@ -329,6 +376,7 @@ class AudioProcessor:
                 
                 band_analysis[band_name] = {
                     'rms_energy': rms_energy,
+                    'instant_rms_energy': instant_rms_energy,
                     'peak_energy': peak_energy,
                     'spectral_centroid': spectral_centroid,
                     'spectral_rolloff': spectral_rolloff,
@@ -339,6 +387,7 @@ class AudioProcessor:
                 print(f"频段 {band_name} 实时滤波错误: {e}")
                 band_analysis[band_name] = {
                     'rms_energy': 0.0,
+                    'instant_rms_energy': 0.0,
                     'peak_energy': 0.0,
                     'spectral_centroid': 0.0,
                     'spectral_rolloff': 0.0,
