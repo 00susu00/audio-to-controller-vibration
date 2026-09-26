@@ -36,6 +36,7 @@ class ControllerManager:
         self.game_feedback_right = 0.0
         self.game_feedback_source = None
         self.last_game_feedback_time = 0.0
+        self.game_feedback_provider = None
         
         # 安全参数
         self.max_continuous_vibration_time = 30  # 最大连续震动时间（秒）
@@ -231,6 +232,34 @@ class ControllerManager:
             source='virtual_x360'
         )
     
+    def attach_game_feedback_source(self, provider):
+        """连接支持register_notification的虚拟手柄反馈源"""
+        if provider is None or not hasattr(provider, 'register_notification'):
+            return False
+        
+        try:
+            provider.register_notification(
+                callback_function=self.handle_virtual_gamepad_feedback
+            )
+            self.game_feedback_provider = provider
+            return True
+        except Exception as e:
+            print(f"连接游戏震动反馈源失败: {e}")
+            return False
+    
+    def detach_game_feedback_source(self):
+        """断开当前虚拟手柄反馈源"""
+        provider = self.game_feedback_provider
+        self.game_feedback_provider = None
+        
+        if provider is not None and hasattr(provider, 'unregister_notification'):
+            try:
+                provider.unregister_notification()
+            except Exception as e:
+                print(f"断开游戏震动反馈源失败: {e}")
+        
+        self.clear_game_vibration_feedback()
+    
     def clear_game_vibration_feedback(self):
         """清空游戏原生震动反馈状态"""
         with self.game_feedback_lock:
@@ -388,7 +417,7 @@ class ControllerManager:
     def cleanup(self):
         """清理资源"""
         print("清理控制器资源...")
-        self.clear_game_vibration_feedback()
+        self.detach_game_feedback_source()
         self.emergency_stop()
         # XInput库不需要显式关闭连接
         print("控制器资源清理完成")
