@@ -91,6 +91,14 @@ class AudioProcessor:
         self.event_flux_baseline = None
         self.event_prev_spectrum = None
     
+    def _clear_audio_queue(self):
+        """清空尚未处理的音频块"""
+        while True:
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
+    
     def _reset_filter_states(self):
         """重置所有实时SOS滤波器与频段能量包络状态"""
         self.lowpass_filter_state = None
@@ -250,6 +258,7 @@ class AudioProcessor:
             return False
         
         try:
+            self._clear_audio_queue()
             self._reset_event_detection_state()
             self._reset_filter_states()
             
@@ -296,11 +305,24 @@ class AudioProcessor:
             print(f"音频状态: {status}")
         
         try:
-            # 将音频数据添加到队列
             audio_data = np.frombuffer(in_data, dtype=np.float32)
-            # 标准模式
-            if not self.audio_queue.full():
-                self.audio_queue.put(audio_data)
+            
+            # 低延迟队列策略：正常情况下直接写入；
+            # 队列满时丢弃最旧块，并优先保留最新音频。
+            try:
+                self.audio_queue.put_nowait(audio_data)
+            except queue.Full:
+                try:
+                    self.audio_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                
+                try:
+                    self.audio_queue.put_nowait(audio_data)
+                except queue.Full:
+                    # 消费线程恰好竞争队列时允许本帧被丢弃，
+                    # 避免在PortAudio回调线程中阻塞。
+                    pass
         except Exception as e:
             print(f"音频回调错误: {e}")
         
