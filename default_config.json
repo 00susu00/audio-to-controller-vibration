@@ -29,7 +29,12 @@
     "enable_sfx_gate": true,
     "sfx_gate_threshold": 0.35,
     "sfx_gate_strength": 0.65,
-    "sfx_gate_floor": 0.2
+    "sfx_gate_floor": 0.2,
+    "enable_game_feedback_ducking": true,
+    "game_feedback_ducking_strength": 0.75,
+    "game_feedback_audio_floor": 0.2,
+    "game_feedback_timeout": 0.18,
+    "game_feedback_passthrough": true
   },
   "sound_classification": {
     "enabled": false,
