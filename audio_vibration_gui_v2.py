@@ -583,6 +583,66 @@ class AudioVibrationGUIv2:
                               font=('Arial', 8), foreground='gray')
         help_label.pack(padx=5, pady=2)
         
+        # 游戏原生震动优先
+        game_feedback_group = ttk.LabelFrame(parent, text="🎮 游戏震动优先")
+        game_feedback_group.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.game_feedback_ducking_enabled = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            game_feedback_group,
+            text="检测到游戏震动时减弱音频震动",
+            variable=self.game_feedback_ducking_enabled,
+            command=self.toggle_game_feedback_ducking
+        ).pack(anchor=tk.W, padx=5, pady=5)
+        
+        ducking_frame = ttk.Frame(game_feedback_group)
+        ducking_frame.pack(fill=tk.X, padx=5, pady=3)
+        ttk.Label(ducking_frame, text="音频减弱强度:").pack(
+            side=tk.LEFT, anchor=tk.W, padx=(0, 5)
+        )
+        self.game_feedback_ducking_strength_var = tk.DoubleVar(value=0.75)
+        ducking_scale = ttk.Scale(
+            ducking_frame,
+            from_=0.0,
+            to=1.0,
+            variable=self.game_feedback_ducking_strength_var,
+            orient=tk.HORIZONTAL,
+            command=self.update_game_feedback_settings
+        )
+        ducking_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.game_feedback_ducking_strength_label = ttk.Label(
+            ducking_frame, text="0.75"
+        )
+        self.game_feedback_ducking_strength_label.pack(side=tk.RIGHT)
+        
+        floor_frame = ttk.Frame(game_feedback_group)
+        floor_frame.pack(fill=tk.X, padx=5, pady=3)
+        ttk.Label(floor_frame, text="音频最低保留:").pack(
+            side=tk.LEFT, anchor=tk.W, padx=(0, 5)
+        )
+        self.game_feedback_audio_floor_var = tk.DoubleVar(value=0.20)
+        floor_scale = ttk.Scale(
+            floor_frame,
+            from_=0.0,
+            to=1.0,
+            variable=self.game_feedback_audio_floor_var,
+            orient=tk.HORIZONTAL,
+            command=self.update_game_feedback_settings
+        )
+        floor_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.game_feedback_audio_floor_label = ttk.Label(
+            floor_frame, text="0.20"
+        )
+        self.game_feedback_audio_floor_label.pack(side=tk.RIGHT)
+        
+        game_feedback_help = ttk.Label(
+            game_feedback_group,
+            text="需要虚拟手柄/反馈回调提供游戏震动数据；游戏震动优先，音频只补充剩余动态余量。",
+            font=('Arial', 8),
+            foreground='gray'
+        )
+        game_feedback_help.pack(padx=5, pady=4)
+        
         # 配置管理已移至首页基础设置，此处移除重复按钮
     
     def setup_band_mapping_panel(self, parent):
@@ -737,6 +797,14 @@ class AudioVibrationGUIv2:
         ttk.Label(audio_data_frame, text="右马达:", style='Data.TLabel').grid(row=1, column=2, sticky=tk.W)
         self.right_motor_display = ttk.Label(audio_data_frame, text="0 (0.0%)", style='Data.TLabel')
         self.right_motor_display.grid(row=1, column=3, sticky=tk.W, padx=10)
+        
+        ttk.Label(audio_data_frame, text="游戏震动:", style='Data.TLabel').grid(row=2, column=0, sticky=tk.W)
+        self.game_feedback_display = ttk.Label(audio_data_frame, text="无", style='Data.TLabel')
+        self.game_feedback_display.grid(row=2, column=1, sticky=tk.W, padx=10)
+        
+        ttk.Label(audio_data_frame, text="音频避让:", style='Data.TLabel').grid(row=2, column=2, sticky=tk.W)
+        self.game_feedback_duck_display = ttk.Label(audio_data_frame, text="1.00", style='Data.TLabel')
+        self.game_feedback_duck_display.grid(row=2, column=3, sticky=tk.W, padx=10)
         
         # 声音识别状态
         recognition_group = ttk.LabelFrame(parent, text="🎯 声音识别状态")
@@ -1080,6 +1148,23 @@ class AudioVibrationGUIv2:
         self.vibration_mapper.enable_sfx_gate = enabled
         self.update_status(f"SFX触觉门控已{'启用' if enabled else '禁用'}")
     
+    def update_game_feedback_settings(self, event=None):
+        """更新游戏震动优先参数"""
+        strength = self.game_feedback_ducking_strength_var.get()
+        floor = self.game_feedback_audio_floor_var.get()
+        
+        self.vibration_mapper.game_feedback_ducking_strength = strength
+        self.vibration_mapper.game_feedback_audio_floor = floor
+        
+        self.game_feedback_ducking_strength_label.config(text=f"{strength:.2f}")
+        self.game_feedback_audio_floor_label.config(text=f"{floor:.2f}")
+    
+    def toggle_game_feedback_ducking(self):
+        """切换游戏震动优先/音频避让"""
+        enabled = self.game_feedback_ducking_enabled.get()
+        self.vibration_mapper.enable_game_feedback_ducking = enabled
+        self.update_status(f"游戏震动优先已{'启用' if enabled else '禁用'}")
+    
     def update_sound_boosts(self, event=None):
         """更新声音增强参数"""
         explosion_boost = self.explosion_boost_var.get()
@@ -1306,9 +1391,21 @@ class AudioVibrationGUIv2:
         self.sfx_gate_strength_var.set(params.get('sfx_gate_strength', 0.65))
         self.sfx_gate_floor_var.set(params.get('sfx_gate_floor', 0.20))
         
+        # 设置游戏震动优先参数
+        self.game_feedback_ducking_enabled.set(
+            params.get('enable_game_feedback_ducking', True)
+        )
+        self.game_feedback_ducking_strength_var.set(
+            params.get('game_feedback_ducking_strength', 0.75)
+        )
+        self.game_feedback_audio_floor_var.set(
+            params.get('game_feedback_audio_floor', 0.20)
+        )
+        
         # 更新标签
         self.update_band_weights()
         self.update_sfx_gate_settings()
+        self.update_game_feedback_settings()
         self.update_continuous_suppression()
         self.update_dialogue_suppression()
         self.update_transient_preservation()
@@ -1416,6 +1513,20 @@ class AudioVibrationGUIv2:
         
         self.left_motor_display.config(text=f"{left_motor_value} ({left_intensity*100:.1f}%)")
         self.right_motor_display.config(text=f"{right_motor_value} ({right_intensity*100:.1f}%)")
+        
+        game_feedback = latest_vibration.get('game_feedback', {})
+        if game_feedback.get('active', False):
+            game_left = game_feedback.get('left_intensity', 0.0)
+            game_right = game_feedback.get('right_intensity', 0.0)
+            source = game_feedback.get('source') or 'feedback'
+            self.game_feedback_display.config(
+                text=f"{source} L{game_left*100:.0f}% / R{game_right*100:.0f}%"
+            )
+        else:
+            self.game_feedback_display.config(text="无")
+        self.game_feedback_duck_display.config(
+            text=f"{game_feedback.get('audio_duck_gain', 1.0):.2f}"
+        )
         
         # 更新声音识别状态
         sound_type = latest_vibration.get('sound_type', 'normal')
@@ -1880,6 +1991,12 @@ class AudioVibrationGUIv2:
         self.vibration_mapper.sfx_gate_threshold = 0.35
         self.vibration_mapper.sfx_gate_strength = 0.65
         self.vibration_mapper.sfx_gate_floor = 0.20
+        self.game_feedback_ducking_enabled.set(True)
+        self.vibration_mapper.enable_game_feedback_ducking = True
+        self.game_feedback_ducking_strength_var.set(0.75)
+        self.game_feedback_audio_floor_var.set(0.20)
+        self.vibration_mapper.game_feedback_ducking_strength = 0.75
+        self.vibration_mapper.game_feedback_audio_floor = 0.20
         default_band_weights = {
             'sub_bass': 1.00,
             'bass': 0.90,
