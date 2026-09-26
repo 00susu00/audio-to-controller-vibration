@@ -268,8 +268,8 @@ class ControllerManager:
             self.game_feedback_source = None
             self.last_game_feedback_time = 0.0
     
-    def get_game_vibration_feedback(self, timeout=0.18):
-        """读取最近的游戏震动反馈；超时后自动视为无原生震动"""
+    def get_game_vibration_feedback(self, timeout=None):
+        """读取游戏震动反馈；默认保持到反馈源明确发送0或被断开"""
         current_time = time.time()
         with self.game_feedback_lock:
             age = (
@@ -277,7 +277,11 @@ class ControllerManager:
                 if self.last_game_feedback_time > 0
                 else float('inf')
             )
-            fresh = age <= max(float(timeout), 0.0)
+            has_feedback = self.last_game_feedback_time > 0
+            fresh = has_feedback and (
+                timeout is None
+                or age <= max(float(timeout), 0.0)
+            )
             left = self.game_feedback_left if fresh else 0.0
             right = self.game_feedback_right if fresh else 0.0
             source = self.game_feedback_source if fresh else None
