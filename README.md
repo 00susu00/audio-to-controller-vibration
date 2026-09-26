@@ -16,7 +16,7 @@
 
 ### 🔊 **先进音频处理 | Advanced Audio Processing**
 
-- ⚡ **低延迟处理** - 最低16ms的音频缓冲，超快响应
+- ⚡ **低延迟处理** - 默认512 samples（44.1kHz下约11.6ms）的实时音频块
 - 🎵 **智能频率分离** - 自动分离低频和高频信号
 - 🌈 **6频段分析** - 从超低音到高音的全频段解析
 - 🎯 **声音识别** - 自动识别爆炸、金属撞击等特殊音效
@@ -89,7 +89,7 @@ python main.py
 **方法二：管理员启动 (推荐) | Admin Launch (Recommended)**
 
 - 双击 `启动程序.bat` 文件
-- 或运行: `python main.py --chunk-size 16`
+- 或运行: `python main.py --chunk-size 512`
 
 ## 📖 详细使用指南 | Detailed Usage Guide
 
@@ -110,6 +110,33 @@ python main.py
    - 🔄 **刷新手柄** - 重新扫描连接的设备
    - 💪 **强制震动测试** - 测试震动功能
    - ⏹️ **强制停止** - 立即停止所有震动
+
+#### **游戏原生震动优先 | Game Feedback Priority**
+
+参考 DSX 3.2 将 Game Feedback 与 Audio/Haptics 分开处理的思路，本项目支持把“游戏原生震动”作为优先信号：
+
+- 有游戏震动反馈时，自动降低音频生成震动
+- 游戏震动保持主导，音频震动只补充剩余马达动态余量
+- 游戏震动结束后，音频震动以较慢释放恢复，避免突然跳变
+- GUI 可调“音频减弱强度”和“音频最低保留”
+
+普通 XInput 只能发送震动，不能直接读取游戏刚刚请求的震动值，因此需要虚拟手柄或其他反馈源把游戏震动回调交给程序。`ControllerManager` 已提供兼容 ViGEm/vgamepad 风格的入口：
+
+```python
+# virtual_pad 为支持 register_notification(...) 的虚拟手柄对象
+controller_manager.attach_game_feedback_source(virtual_pad)
+```
+
+也可以直接从自定义反馈源写入：
+
+```python
+controller_manager.update_game_vibration_feedback(
+    large_motor,
+    small_motor,
+    max_value=255,
+    source='virtual_x360'
+)
+```
 
 ### **🎧 音频源配置 | Audio Source Configuration**
 
