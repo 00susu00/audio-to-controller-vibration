@@ -59,6 +59,13 @@ class VibrationMapper:
         self.sfx_gate_threshold = 0.35           # SFX分数门槛
         self.sfx_gate_strength = 0.65            # 门控抑制强度
         self.sfx_gate_floor = 0.20               # 低分声音最低保留比例
+        
+        # 游戏原生震动优先：有游戏反馈时自动压低音频震动
+        self.enable_game_feedback_ducking = True
+        self.game_feedback_ducking_strength = 0.75
+        self.game_feedback_audio_floor = 0.20
+        self.game_feedback_timeout = 0.18
+        self.game_feedback_passthrough = True
         self.band_weights = {
             'sub_bass': 1.00,
             'bass': 0.90,
@@ -98,6 +105,8 @@ class VibrationMapper:
         self.envelope_left_intensity = 0.0
         self.envelope_right_intensity = 0.0
         self.last_envelope_time = time.time()
+        self.current_game_feedback_duck_gain = 1.0
+        self.last_game_feedback_duck_time = time.time()
         
         # 使用锁保证线程安全
         self.intensity_lock = Lock()
@@ -135,6 +144,11 @@ class VibrationMapper:
             'sfx_gate_threshold': self.sfx_gate_threshold,
             'sfx_gate_strength': self.sfx_gate_strength,
             'sfx_gate_floor': self.sfx_gate_floor,
+            'enable_game_feedback_ducking': self.enable_game_feedback_ducking,
+            'game_feedback_ducking_strength': self.game_feedback_ducking_strength,
+            'game_feedback_audio_floor': self.game_feedback_audio_floor,
+            'game_feedback_timeout': self.game_feedback_timeout,
+            'game_feedback_passthrough': self.game_feedback_passthrough,
             'band_weights': self.band_weights.copy(),
             'continuous_sound_suppression': self.continuous_sound_suppression,
             'midrange_dialogue_suppression': self.midrange_dialogue_suppression,
@@ -509,6 +523,79 @@ class VibrationMapper:
             components
         )
 
+    def _apply_game_feedback_priority(self, audio_left, audio_right):
+        """
+        游戏原生震动优先混合。
+        
+        当虚拟手柄/反馈源提供游戏震动时，降低音频震动，并让游戏震动
+        作为主信号直通；音频只补充剩余马达余量。
+        """
+        status = {
+            'active': False,
+            'left_intensity': 0.0,
+            'right_intensity': 0.0,
+            'strength': 0.0,
+            'source': None
+        }
+        
+        if (
+            self.controller_manager
+            and hasattr(self.controller_manager, 'get_game_vibration_feedback')
+        ):
+            status = self.controller_manager.get_game_vibration_feedback(
+                timeout=self.game_feedback_timeout
+            )
+        
+        game_left = float(np.clip(status.get('left_intensity', 0.0), 0.0, 1.0))
+        game_right = float(np.clip(status.get('right_intensity', 0.0), 0.0, 1.0))
+        game_strength = float(np.clip(status.get('strength', 0.0), 0.0, 1.0))
+        
+        target_duck_gain = 1.0
+        if self.enable_game_feedback_ducking and status.get('active', False):
+            strength = float(np.clip(
+                self.game_feedback_ducking_strength, 0.0, 1.0
+            ))
+            floor = float(np.clip(
+                self.game_feedback_audio_floor, 0.0, 1.0
+            ))
+            target_duck_gain = max(
+                floor,
+                1.0 - strength * game_strength
+            )
+        
+        # 快速压低、稍慢恢复，避免游戏震动开关时音频触觉突然跳变
+        now = time.time()
+        dt = max(0.0, now - self.last_game_feedback_duck_time)
+        self.last_game_feedback_duck_time = now
+        tau = 0.020 if target_duck_gain < self.current_game_feedback_duck_gain else 0.120
+        alpha = 1.0 - np.exp(-dt / max(tau, 1e-6))
+        self.current_game_feedback_duck_gain += alpha * (
+            target_duck_gain - self.current_game_feedback_duck_gain
+        )
+        duck_gain = float(np.clip(
+            self.current_game_feedback_duck_gain, 0.0, 1.0
+        ))
+        
+        ducked_left = float(np.clip(audio_left, 0.0, 1.0)) * duck_gain
+        ducked_right = float(np.clip(audio_right, 0.0, 1.0)) * duck_gain
+        
+        if self.game_feedback_passthrough and status.get('active', False):
+            # 游戏反馈占主导；音频只填充游戏马达尚未使用的动态余量。
+            final_left = game_left + ducked_left * (1.0 - game_left)
+            final_right = game_right + ducked_right * (1.0 - game_right)
+        else:
+            final_left = ducked_left
+            final_right = ducked_right
+        
+        return final_left, final_right, {
+            'active': bool(status.get('active', False)),
+            'left_intensity': game_left,
+            'right_intensity': game_right,
+            'strength': game_strength,
+            'audio_duck_gain': duck_gain,
+            'source': status.get('source')
+        }
+    
     def _clamp_vibration_intensities(self, left_intensity, right_intensity):
         """统一限制最终震动强度到0-1，避免增强链路产生越界值"""
         left = float(np.clip(left_intensity, 0.0, 1.0))
@@ -548,6 +635,14 @@ class VibrationMapper:
         sound_type = 'normal'
         sfx_score = 1.0
         sfx_gate_gain = 1.0
+        game_feedback_status = {
+            'active': False,
+            'left_intensity': 0.0,
+            'right_intensity': 0.0,
+            'strength': 0.0,
+            'audio_duck_gain': 1.0,
+            'source': None
+        }
         sfx_components = {
             'transient_score': 0.0,
             'impact_score': 0.0,
@@ -639,9 +734,15 @@ class VibrationMapper:
                 left_intensity, right_intensity, audio_events
             )
         
-        # 对最终结果应用 Attack/Decay 包络
+        # 对音频震动应用 Attack/Decay 包络
         left_intensity, right_intensity = self.apply_attack_decay_envelope(
             left_intensity, right_intensity
+        )
+        
+        # 参考DSX的Game Feedback/Audio Haptics分层思路：
+        # 游戏原生震动存在时优先保留，并自动降低音频震动占比。
+        left_intensity, right_intensity, game_feedback_status = (
+            self._apply_game_feedback_priority(left_intensity, right_intensity)
         )
         
         # 最终统一限幅；GUI返回值与真正发送给手柄的值保持一致
@@ -663,6 +764,7 @@ class VibrationMapper:
             'sound_type': sound_type,
             'sfx_score': sfx_score,
             'sfx_gate_gain': sfx_gate_gain,
+            'game_feedback': game_feedback_status,
             'sfx_components': sfx_components,
             'frequency_bands': {
                 name: float(band_analysis.get(name, {}).get('rms_energy', 0.0))
@@ -694,6 +796,8 @@ class VibrationMapper:
             self.envelope_left_intensity = 0.0
             self.envelope_right_intensity = 0.0
             self.last_envelope_time = time.time()
+            self.current_game_feedback_duck_gain = 1.0
+            self.last_game_feedback_duck_time = time.time()
         
         if self.controller_manager:
             self.controller_manager.set_vibration(0, 0)
