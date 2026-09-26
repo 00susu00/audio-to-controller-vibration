@@ -761,6 +761,22 @@ class AudioVibrationGUIv2:
         self.sfx_gate_gain_display = ttk.Label(recognition_frame, text="1.00", style='Data.TLabel')
         self.sfx_gate_gain_display.grid(row=3, column=1, sticky=tk.W, padx=10)
         
+        ttk.Label(recognition_frame, text="瞬态:", style='Data.TLabel').grid(row=0, column=2, sticky=tk.W, padx=(20, 0))
+        self.sfx_transient_display = ttk.Label(recognition_frame, text="0.00", style='Data.TLabel')
+        self.sfx_transient_display.grid(row=0, column=3, sticky=tk.W, padx=10)
+        
+        ttk.Label(recognition_frame, text="低频/高频占比:", style='Data.TLabel').grid(row=1, column=2, sticky=tk.W, padx=(20, 0))
+        self.sfx_edge_ratio_display = ttk.Label(recognition_frame, text="0.00 / 0.00", style='Data.TLabel')
+        self.sfx_edge_ratio_display.grid(row=1, column=3, sticky=tk.W, padx=10)
+        
+        ttk.Label(recognition_frame, text="中频/人声占比:", style='Data.TLabel').grid(row=2, column=2, sticky=tk.W, padx=(20, 0))
+        self.sfx_vocal_ratio_display = ttk.Label(recognition_frame, text="0.00", style='Data.TLabel')
+        self.sfx_vocal_ratio_display.grid(row=2, column=3, sticky=tk.W, padx=10)
+        
+        ttk.Label(recognition_frame, text="原始分数:", style='Data.TLabel').grid(row=3, column=2, sticky=tk.W, padx=(20, 0))
+        self.sfx_raw_score_display = ttk.Label(recognition_frame, text="0.00", style='Data.TLabel')
+        self.sfx_raw_score_display.grid(row=3, column=3, sticky=tk.W, padx=10)
+        
         # 频段分析
         bands_group = ttk.LabelFrame(parent, text="📈 频段分析（柱=相对能量，数值=RMS）")
         bands_group.pack(fill=tk.X, padx=5, pady=5)
@@ -1422,8 +1438,25 @@ class AudioVibrationGUIv2:
         
         sfx_score = latest_vibration.get('sfx_score', 1.0)
         sfx_gate_gain = latest_vibration.get('sfx_gate_gain', 1.0)
+        sfx_components = latest_vibration.get('sfx_components', {})
+        
         self.sfx_score_display.config(text=f"{sfx_score:.2f}")
         self.sfx_gate_gain_display.config(text=f"{sfx_gate_gain:.2f}")
+        self.sfx_transient_display.config(
+            text=f"{sfx_components.get('transient_score', 0.0):.2f}"
+        )
+        self.sfx_edge_ratio_display.config(
+            text=(
+                f"{sfx_components.get('low_ratio', 0.0):.2f} / "
+                f"{sfx_components.get('high_ratio', 0.0):.2f}"
+            )
+        )
+        self.sfx_vocal_ratio_display.config(
+            text=f"{sfx_components.get('vocal_ratio', 0.0):.2f}"
+        )
+        self.sfx_raw_score_display.config(
+            text=f"{sfx_components.get('raw_score', 0.0):.2f}"
+        )
         
         # 更新频段显示
         self.update_frequency_bands_display(latest_vibration)
