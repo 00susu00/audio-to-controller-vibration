@@ -509,12 +509,22 @@ class VibrationMapper:
             components
         )
 
+    def _clamp_vibration_intensities(self, left_intensity, right_intensity):
+        """统一限制最终震动强度到0-1，避免增强链路产生越界值"""
+        left = float(np.clip(left_intensity, 0.0, 1.0))
+        right = float(np.clip(right_intensity, 0.0, 1.0))
+        return left, right
+    
     def update_controller_vibration(self, left_intensity, right_intensity, force=False):
         """更新控制器震动"""
         if self.controller_manager:
+            left_intensity, right_intensity = self._clamp_vibration_intensities(
+                left_intensity, right_intensity
+            )
+            
             # 转换强度到XInput格式 (0-65535)
-            left_motor = int(left_intensity * 65535)
-            right_motor = int(right_intensity * 65535)
+            left_motor = int(round(left_intensity * 65535))
+            right_motor = int(round(right_intensity * 65535))
             
             # 发送震动命令
             return self.controller_manager.set_vibration(left_motor, right_motor, force=force)
@@ -631,6 +641,11 @@ class VibrationMapper:
         
         # 对最终结果应用 Attack/Decay 包络
         left_intensity, right_intensity = self.apply_attack_decay_envelope(
+            left_intensity, right_intensity
+        )
+        
+        # 最终统一限幅；GUI返回值与真正发送给手柄的值保持一致
+        left_intensity, right_intensity = self._clamp_vibration_intensities(
             left_intensity, right_intensity
         )
 
