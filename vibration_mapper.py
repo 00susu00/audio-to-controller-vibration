@@ -381,13 +381,25 @@ class VibrationMapper:
         return self.apply_smoothing(enhanced_left, enhanced_right)
 
     def _calculate_sfx_score(self, sound_type, band_analysis, audio_events):
-        """计算当前声音是否值得产生触觉的统一SFX分数 (0-1)"""
+        """计算当前声音是否值得产生触觉的统一SFX分数，并返回可解释特征"""
+        default_components = {
+            'transient_score': 0.0,
+            'impact_score': 0.0,
+            'low_ratio': 0.0,
+            'high_ratio': 0.0,
+            'edge_ratio': 0.0,
+            'vocal_ratio': 0.0,
+            'steady_score': 1.0,
+            'dominant_bonus': 0.0,
+            'raw_score': 0.0
+        }
+        
         if not band_analysis or not audio_events:
-            return 1.0
+            return 1.0, default_components
         
         # 第一帧没有跨帧变化信息，不做门控，避免启动瞬间被误压制
         if not audio_events.get('has_previous_frame', False):
-            return 1.0
+            return 1.0, default_components
         
         energies = {
             name: max(0.0, float(band_analysis.get(name, {}).get('rms_energy', 0.0)))
@@ -395,7 +407,7 @@ class VibrationMapper:
         }
         total_energy = sum(energies.values())
         if total_energy <= 1e-10:
-            return 0.0
+            return 0.0, default_components
         
         transient_score = float(np.clip(
             abs(audio_events.get('energy_change_rate', 0.0)) / 1.5, 0.0, 1.0
@@ -404,8 +416,12 @@ class VibrationMapper:
             audio_events.get('impact_intensity', 0.0), 0.0, 1.0
         ))
         
-        low_ratio = (energies['sub_bass'] + energies['bass']) / total_energy
-        high_ratio = (energies['high_mid'] + energies['treble']) / total_energy
+        low_ratio = float(np.clip(
+            (energies['sub_bass'] + energies['bass']) / total_energy, 0.0, 1.0
+        ))
+        high_ratio = float(np.clip(
+            (energies['high_mid'] + energies['treble']) / total_energy, 0.0, 1.0
+        ))
         edge_ratio = float(np.clip(max(low_ratio, high_ratio), 0.0, 1.0))
         
         vocal_ratio = float(np.clip(
@@ -424,13 +440,14 @@ class VibrationMapper:
             'sub_bass', 'bass', 'high_mid', 'treble'
         ) else 0.25
         
-        score = (
+        raw_score = (
             0.45 * transient_score
             + 0.20 * impact_score
             + 0.20 * edge_ratio
             + 0.15 * dominant_bonus
             - 0.25 * steady_score * vocal_ratio
         )
+        score = raw_score
         
         # 已识别的典型SFX与明确冲击不应被门控层误杀
         if sound_type != 'normal':
@@ -438,20 +455,33 @@ class VibrationMapper:
         if audio_events.get('impact_detected', False):
             score = max(score, 0.95)
         
-        return float(np.clip(score, 0.0, 1.0))
+        components = {
+            'transient_score': transient_score,
+            'impact_score': impact_score,
+            'low_ratio': low_ratio,
+            'high_ratio': high_ratio,
+            'edge_ratio': edge_ratio,
+            'vocal_ratio': vocal_ratio,
+            'steady_score': steady_score,
+            'dominant_bonus': dominant_bonus,
+            'raw_score': float(np.clip(raw_score, 0.0, 1.0))
+        }
+        return float(np.clip(score, 0.0, 1.0)), components
 
     def _apply_sfx_haptic_gate(
         self, left_intensity, right_intensity, sound_type, band_analysis, audio_events
     ):
         """根据SFX分数衰减对白/BGM等低触觉价值声音"""
-        score = self._calculate_sfx_score(sound_type, band_analysis, audio_events)
+        score, components = self._calculate_sfx_score(
+            sound_type, band_analysis, audio_events
+        )
         
         if not self.enable_sfx_gate:
-            return left_intensity, right_intensity, score, 1.0
+            return left_intensity, right_intensity, score, 1.0, components
         
         # 第一帧直接放行
         if not audio_events or not audio_events.get('has_previous_frame', False):
-            return left_intensity, right_intensity, score, 1.0
+            return left_intensity, right_intensity, score, 1.0, components
         
         threshold = float(np.clip(self.sfx_gate_threshold, 0.0, 0.95))
         strength = float(np.clip(self.sfx_gate_strength, 0.0, 1.0))
@@ -470,7 +500,8 @@ class VibrationMapper:
             left_intensity * gate_gain,
             right_intensity * gate_gain,
             score,
-            gate_gain
+            gate_gain,
+            components
         )
 
     def update_controller_vibration(self, left_intensity, right_intensity, force=False):
@@ -502,6 +533,17 @@ class VibrationMapper:
         sound_type = 'normal'
         sfx_score = 1.0
         sfx_gate_gain = 1.0
+        sfx_components = {
+            'transient_score': 0.0,
+            'impact_score': 0.0,
+            'low_ratio': 0.0,
+            'high_ratio': 0.0,
+            'edge_ratio': 0.0,
+            'vocal_ratio': 0.0,
+            'steady_score': 1.0,
+            'dominant_bonus': 0.0,
+            'raw_score': 0.0
+        }
         
         needs_audio_analysis = (
             self.enable_sound_classification
@@ -560,7 +602,8 @@ class VibrationMapper:
                 left_intensity,
                 right_intensity,
                 sfx_score,
-                sfx_gate_gain
+                sfx_gate_gain,
+                sfx_components
             ) = self._apply_sfx_haptic_gate(
                 left_intensity,
                 right_intensity,
@@ -600,6 +643,7 @@ class VibrationMapper:
             'sound_type': sound_type,
             'sfx_score': sfx_score,
             'sfx_gate_gain': sfx_gate_gain,
+            'sfx_components': sfx_components,
             'frequency_bands': {
                 name: float(band_analysis.get(name, {}).get('rms_energy', 0.0))
                 if band_analysis else 0.0
