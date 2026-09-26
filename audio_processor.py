@@ -37,6 +37,13 @@ class AudioProcessor:
         self.volume_window_size = 3
         self.impact_energy_threshold = 5.0
         
+        # 瞬态检测状态：短时能量基线 + 频谱变化基线
+        self.event_energy_baseline = None
+        self.event_flux_baseline = None
+        self.event_prev_spectrum = None
+        self.event_energy_alpha = 0.08
+        self.event_flux_alpha = 0.10
+        
         # 频谱分析参数
         self.window = np.hanning(chunk_size)
         
@@ -63,6 +70,33 @@ class AudioProcessor:
         self.volume_buffer = []
         
         
+    def _reset_event_detection_state(self):
+        """重置瞬态检测器的历史状态"""
+        self.event_energy_baseline = None
+        self.event_flux_baseline = None
+        self.event_prev_spectrum = None
+    
+    def _calculate_spectral_flux(self, audio_data):
+        """计算归一化正向频谱通量，返回(通量, 是否存在上一帧频谱)"""
+        if audio_data is None or len(audio_data) < 4:
+            return 0.0, False
+        
+        window = np.hanning(len(audio_data))
+        spectrum = np.abs(np.fft.rfft(audio_data * window))
+        spectrum = spectrum / (np.sum(spectrum) + 1e-12)
+        
+        if (
+            self.event_prev_spectrum is None
+            or len(self.event_prev_spectrum) != len(spectrum)
+        ):
+            self.event_prev_spectrum = spectrum
+            return 0.0, False
+        
+        positive_change = np.maximum(spectrum - self.event_prev_spectrum, 0.0)
+        spectral_flux = float(np.sum(positive_change))
+        self.event_prev_spectrum = spectrum
+        return spectral_flux, True
+    
     def _create_lowpass_filter(self, cutoff_freq):
         """创建低通滤波器"""
         nyquist = self.sample_rate / 2
@@ -157,6 +191,8 @@ class AudioProcessor:
             return False
         
         try:
+            self._reset_event_detection_state()
+            
             if not self.audio:
                 self.audio = pyaudio.PyAudio()
             
@@ -336,34 +372,113 @@ class AudioProcessor:
             return 0.0
     
     def detect_audio_events(self, audio_data, previous_data=None, band_analysis=None):
-        """检测音频事件特征（冲击、渐变等）"""
+        """使用EMA能量基线与频谱通量联合检测瞬态/冲击"""
         events = {
             'impact_detected': False,
             'impact_intensity': 0.0,
             'frequency_shift': 0.0,
             'energy_change_rate': 0.0,
+            'energy_ratio': 1.0,
+            'energy_onset_score': 0.0,
+            'spectral_flux': 0.0,
+            'spectral_flux_score': 0.0,
+            'transient_score': 0.0,
             'dominant_frequency_band': 'mid',
             'has_previous_frame': False
         }
         
         try:
-            current_energy = np.mean(audio_data**2)
+            current_energy = float(np.mean(audio_data**2))
+            has_previous_audio = (
+                previous_data is not None
+                and len(previous_data) == len(audio_data)
+            )
             
-            # 检测瞬时冲击（能量突变）
-            if previous_data is not None and len(previous_data) == len(audio_data):
-                events['has_previous_frame'] = True
-                previous_energy = np.mean(previous_data**2)
-                energy_ratio = current_energy / (previous_energy + 1e-10)
+            # 先基于历史EMA计算能量突增，随后再更新基线，避免瞬态污染参考值
+            if self.event_energy_baseline is None:
+                self.event_energy_baseline = current_energy
+                energy_ratio = 1.0
+                energy_onset_score = 0.0
+            else:
+                baseline = max(self.event_energy_baseline, 1e-10)
+                energy_ratio = current_energy / baseline
+                threshold = max(float(self.impact_energy_threshold), 1.01)
+                energy_onset_score = float(np.clip(
+                    np.log(max(energy_ratio, 1.0)) / np.log(threshold),
+                    0.0,
+                    1.0
+                ))
                 
-                # 冲击检测阈值
-                if energy_ratio > self.impact_energy_threshold:
-                    events['impact_detected'] = True
-                    events['impact_intensity'] = min(
-                        1.0,
-                        energy_ratio / max(self.impact_energy_threshold * 2.0, 1e-6)
+                # 强瞬态期间让基线慢速跟随，普通声音则正常EMA跟随
+                alpha = self.event_energy_alpha
+                if energy_ratio > 1.5:
+                    alpha *= 0.20
+                self.event_energy_baseline = (
+                    (1.0 - alpha) * self.event_energy_baseline
+                    + alpha * current_energy
+                )
+            
+            events['energy_ratio'] = float(energy_ratio)
+            events['energy_onset_score'] = energy_onset_score
+            
+            # 保留相邻帧能量变化，兼容现有监控/逻辑
+            if has_previous_audio:
+                previous_energy = float(np.mean(previous_data**2))
+                previous_ratio = current_energy / max(previous_energy, 1e-10)
+                events['energy_change_rate'] = previous_ratio - 1.0
+            
+            # 频谱通量用于捕捉“音色/频谱突然变化”，弥补单纯音量比值的不足
+            spectral_flux, has_previous_spectrum = self._calculate_spectral_flux(audio_data)
+            events['spectral_flux'] = spectral_flux
+            
+            if has_previous_spectrum:
+                if self.event_flux_baseline is None:
+                    self.event_flux_baseline = spectral_flux
+                    spectral_flux_score = 0.0
+                else:
+                    flux_reference = max(self.event_flux_baseline, 0.015)
+                    spectral_flux_score = float(np.clip(
+                        (spectral_flux - self.event_flux_baseline)
+                        / (flux_reference * 2.0),
+                        0.0,
+                        1.0
+                    ))
+                    
+                    flux_alpha = self.event_flux_alpha
+                    if spectral_flux_score > 0.6:
+                        flux_alpha *= 0.25
+                    self.event_flux_baseline = (
+                        (1.0 - flux_alpha) * self.event_flux_baseline
+                        + flux_alpha * spectral_flux
                     )
-                
-                events['energy_change_rate'] = energy_ratio - 1.0
+            else:
+                spectral_flux_score = 0.0
+            
+            events['spectral_flux_score'] = spectral_flux_score
+            events['has_previous_frame'] = has_previous_audio and has_previous_spectrum
+            
+            # 联合瞬态分数：能量突增为主，频谱突变为辅
+            transient_score = float(np.clip(
+                0.70 * energy_onset_score + 0.30 * spectral_flux_score,
+                0.0,
+                1.0
+            ))
+            events['transient_score'] = transient_score
+            
+            # 强能量突增直接判定冲击；联合特征可捕捉较弱但很尖锐的SFX
+            hard_energy_impact = energy_ratio > max(self.impact_energy_threshold, 1.01)
+            combined_impact = transient_score > 0.72 and energy_ratio > 1.35
+            spectral_impact = spectral_flux_score > 0.90 and energy_ratio > 1.15
+            
+            if events['has_previous_frame'] and (
+                hard_energy_impact or combined_impact or spectral_impact
+            ):
+                events['impact_detected'] = True
+                events['impact_intensity'] = float(np.clip(
+                    max(energy_onset_score, transient_score),
+                    0.0,
+                    1.0
+                ))
             
             # 分析频段分布，找出主导频段；已有结果时直接复用，避免重复滤波
             if band_analysis is None:
@@ -379,13 +494,19 @@ class AudioProcessor:
             events['dominant_frequency_band'] = dominant_band
             
             # 计算频率偏移（高频vs低频的比例）
-            high_energy = (band_analysis.get('high_mid', {}).get('rms_energy', 0) + 
-                          band_analysis.get('treble', {}).get('rms_energy', 0))
-            low_energy = (band_analysis.get('sub_bass', {}).get('rms_energy', 0) + 
-                         band_analysis.get('bass', {}).get('rms_energy', 0))
+            high_energy = (
+                band_analysis.get('high_mid', {}).get('rms_energy', 0)
+                + band_analysis.get('treble', {}).get('rms_energy', 0)
+            )
+            low_energy = (
+                band_analysis.get('sub_bass', {}).get('rms_energy', 0)
+                + band_analysis.get('bass', {}).get('rms_energy', 0)
+            )
             
             if low_energy + high_energy > 1e-10:
-                events['frequency_shift'] = (high_energy - low_energy) / (high_energy + low_energy)
+                events['frequency_shift'] = (
+                    (high_energy - low_energy) / (high_energy + low_energy)
+                )
             
         except Exception as e:
             print(f"音频事件检测错误: {e}")
