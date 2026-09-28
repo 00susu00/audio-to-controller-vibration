@@ -58,14 +58,9 @@ class GameFeedbackProxy:
                 return new_slots[0]
             time.sleep(0.02)
 
-        # vgamepad 的 get_index() 在 Windows/ViGEm 上通常对应 XInput user index；
-        # 仅作为无法通过前后差分识别时的后备。
-        try:
-            candidate = int(self.virtual_gamepad.get_index())
-            if 0 <= candidate <= 3 and candidate != self.physical_controller_id:
-                return candidate
-        except Exception:
-            pass
+        # vgamepad.get_index() 是 ViGEm 内部 target index，不保证等于 XInput
+        # user index，因此不能拿它来排除某个 XInput 槽位。识别不唯一时保持 None，
+        # 比误判实体手柄更安全。
         return None
 
     def start(self):
