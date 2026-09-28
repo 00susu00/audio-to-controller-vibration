@@ -635,11 +635,28 @@ class AudioVibrationGUIv2:
         )
         self.game_feedback_audio_floor_label.pack(side=tk.RIGHT)
         
+        proxy_status_frame = ttk.Frame(game_feedback_group)
+        proxy_status_frame.pack(fill=tk.X, padx=5, pady=3)
+
+        ttk.Label(proxy_status_frame, text="震动代理:").pack(side=tk.LEFT)
+        self.game_feedback_proxy_status_label = ttk.Label(
+            proxy_status_frame, text="检查中...", foreground='orange'
+        )
+        self.game_feedback_proxy_status_label.pack(side=tk.LEFT, padx=(5, 10))
+
+        ttk.Button(
+            proxy_status_frame,
+            text="重启代理",
+            command=self.restart_game_feedback_proxy
+        ).pack(side=tk.RIGHT)
+
         game_feedback_help = ttk.Label(
             game_feedback_group,
-            text="需要虚拟手柄/反馈回调提供游戏震动数据；游戏震动优先，音频只补充剩余动态余量。",
+            text="程序会自动创建虚拟Xbox手柄并镜像实体手柄输入。为保证游戏震动回调进入本程序，推荐使用HidHide让游戏只看到虚拟手柄。",
             font=('Arial', 8),
-            foreground='gray'
+            foreground='gray',
+            wraplength=520,
+            justify=tk.LEFT
         )
         game_feedback_help.pack(padx=5, pady=4)
         
@@ -1266,6 +1283,28 @@ class AudioVibrationGUIv2:
             messagebox.showerror("刷新失败", f"手柄刷新出错: {e}")
             self.update_status(f"手柄刷新失败: {e}")
     
+    def restart_game_feedback_proxy(self):
+        """重启虚拟Xbox手柄代理。"""
+        try:
+            self.update_status("正在重启游戏震动代理...")
+            success = self.controller_manager.restart_game_feedback_proxy()
+            self.update_controller_status()
+            if success:
+                self.update_status("游戏震动代理已启动")
+            else:
+                status = self.controller_manager.get_game_feedback_proxy_status()
+                error = status.get('last_error') or '未知错误'
+                self.update_status(f"游戏震动代理启动失败: {error}")
+                messagebox.showwarning(
+                    "震动代理",
+                    "虚拟Xbox手柄代理启动失败。\n\n"
+                    f"{error}\n\n"
+                    "请确认已安装 vgamepad/ViGEmBus。"
+                )
+        except Exception as e:
+            self.update_status(f"游戏震动代理重启失败: {e}")
+            messagebox.showerror("震动代理", f"重启失败: {e}")
+
     def force_vibration_test(self):
         """强制震动测试"""
         try:
@@ -1338,6 +1377,27 @@ class AudioVibrationGUIv2:
             
             if hasattr(self, 'controller_status_label'):
                 self.controller_status_label.config(text=status_text, foreground=status_color)
+
+            if hasattr(self, 'game_feedback_proxy_status_label'):
+                proxy_status = self.controller_manager.get_game_feedback_proxy_status()
+                if proxy_status.get('running', False):
+                    physical_id = proxy_status.get('physical_controller_id')
+                    virtual_id = proxy_status.get('virtual_controller_id')
+                    virtual_text = (
+                        f"XInput {virtual_id}"
+                        if virtual_id is not None
+                        else "虚拟手柄"
+                    )
+                    self.game_feedback_proxy_status_label.config(
+                        text=f"运行中: 实体 {physical_id} → {virtual_text}",
+                        foreground='green'
+                    )
+                else:
+                    error = proxy_status.get('last_error')
+                    self.game_feedback_proxy_status_label.config(
+                        text=("未运行" if not error else f"未运行: {error}"),
+                        foreground='red' if error else 'gray'
+                    )
                 
         except Exception as e:
             print(f"更新手柄状态失败: {e}")
