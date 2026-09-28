@@ -33,6 +33,7 @@ def check_dependencies():
         'numpy': 'numpy',
         'scipy': 'scipy',
         'matplotlib': 'matplotlib',
+        'vgamepad': 'vgamepad',
         'tkinter': 'tkinter (通常随Python安装)'
     }
     
@@ -99,6 +100,12 @@ def setup_argument_parser():
     
     parser.add_argument('--device-id', type=int, default=None,
                        help='音频设备ID（默认: 自动检测）')
+
+    parser.add_argument('--no-game-feedback-proxy', action='store_true',
+                       help='禁用虚拟Xbox手柄代理（默认自动启用，用于捕获游戏原生震动）')
+
+    parser.add_argument('--gamepad-poll-hz', type=int, default=250,
+                       help='实体手柄到虚拟手柄的输入镜像频率（默认: 250 Hz）')
     
     
     parser.add_argument('--test-audio', action='store_true',
@@ -318,6 +325,11 @@ def run_command_line_mode(args):
             print("错误: 未检测到手柄")
             return False
         
+        if not args.no_game_feedback_proxy:
+            controller_manager.start_game_feedback_proxy(
+                poll_hz=args.gamepad_poll_hz
+            )
+
         vibration_mapper = VibrationMapper(controller_manager)
         
         # 启动音频录制
@@ -405,6 +417,11 @@ def run_gui_mode(args):
         if not controller_manager.connected_controllers:
             print("警告: 未检测到手柄，某些功能将无法使用")
         
+        if not args.no_game_feedback_proxy and controller_manager.connected_controllers:
+            controller_manager.start_game_feedback_proxy(
+                poll_hz=args.gamepad_poll_hz
+            )
+
         vibration_mapper = VibrationMapper(controller_manager)
         
         # 创建并运行GUI v2.0
@@ -432,6 +449,7 @@ def main():
     print("- 多种预设模式")
     print("- 直观的GUI界面")
     print("- 支持XInput兼容手柄")
+    print("- 自动虚拟X360代理捕获游戏原生震动并与音频触觉混合")
     print("="*60)
     
     # 解析命令行参数
