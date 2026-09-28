@@ -115,12 +115,16 @@ python main.py
 
 参考 DSX 3.2 将 Game Feedback 与 Audio/Haptics 分开处理的思路，本项目支持把“游戏原生震动”作为优先信号：
 
+> 当前增强分支会默认启动一个 **vgamepad/ViGEm 虚拟 Xbox 360 手柄代理**：实体 XInput 手柄的按键、扳机和摇杆会以约 250 Hz 镜像到虚拟手柄；游戏发送给虚拟手柄的原生震动会自动回调到程序，再与音频触觉进行优先级混合。
+>
+> 为确保游戏把震动发给虚拟手柄而不是直接发给实体手柄，推荐使用 **HidHide** 对游戏隐藏实体手柄，并将 Python/本程序加入 HidHide 应用白名单。若游戏本身可以手动选择虚拟控制器，也可以直接选择虚拟 Xbox 360 手柄。
+
 - 有游戏震动反馈时，自动降低音频生成震动
 - 游戏震动保持主导，音频震动只补充剩余马达动态余量
 - 游戏震动结束后，音频震动以较慢释放恢复，避免突然跳变
 - GUI 可调“音频减弱强度”和“音频最低保留”
 
-普通 XInput 只能发送震动，不能直接读取游戏刚刚请求的震动值，因此需要虚拟手柄或其他反馈源把游戏震动回调交给程序。`ControllerManager` 已提供兼容 ViGEm/vgamepad 风格的入口：
+普通 XInput 不能直接读取游戏刚刚请求的震动值，因此本分支默认通过虚拟 Xbox 360 手柄代理捕获该反馈。可用 `--no-game-feedback-proxy` 禁用自动代理，或用 `--gamepad-poll-hz` 调整输入镜像频率。`ControllerManager` 已提供兼容 ViGEm/vgamepad 风格的入口：
 
 ```python
 # virtual_pad 为支持 register_notification(...) 的虚拟手柄对象
