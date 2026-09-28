@@ -37,6 +37,7 @@ class ControllerManager:
         self.game_feedback_source = None
         self.last_game_feedback_time = 0.0
         self.game_feedback_provider = None
+        self.game_feedback_proxy = None
         
         # 安全参数
         self.max_continuous_vibration_time = 30  # 最大连续震动时间（秒）
@@ -49,12 +50,23 @@ class ControllerManager:
         """扫描可用的控制器"""
         self.connected_controllers = []
         
+        virtual_controller_id = None
+        if self.game_feedback_proxy is not None:
+            try:
+                proxy_status = self.game_feedback_proxy.get_status()
+                if proxy_status.get('running', False):
+                    virtual_controller_id = proxy_status.get('virtual_controller_id')
+            except Exception:
+                pass
+
         for i in range(4):  # XInput最多支持4个控制器
             try:
-                state = XInput.get_state(i)
+                XInput.get_state(i)
+                if virtual_controller_id is not None and i == virtual_controller_id:
+                    continue
                 self.connected_controllers.append(i)
-                print(f"检测到控制器 {i}")
-            except:
+                print(f"检测到实体控制器 {i}")
+            except Exception:
                 continue
         
         if not self.connected_controllers:
@@ -96,7 +108,8 @@ class ControllerManager:
             'controller_count': len(self.connected_controllers),
             'current_controller': self.current_controller_id,
             'vibration_supported': self.vibration_supported,
-            'connected_controllers': self.connected_controllers
+            'connected_controllers': self.connected_controllers,
+            'game_feedback_proxy': self.get_game_feedback_proxy_status()
         }
         
         # 获取当前控制器详细状态
@@ -174,7 +187,17 @@ class ControllerManager:
                 # 强制模式时，尝试发送到所有可能的控制器
                 if force:
                     success_count = 0
+                    virtual_controller_id = None
+                    proxy_status = self.get_game_feedback_proxy_status()
+                    if proxy_status.get('running', False):
+                        virtual_controller_id = proxy_status.get('virtual_controller_id')
+
                     for controller_id in range(4):  # XInput支持0-3
+                        if (
+                            virtual_controller_id is not None
+                            and controller_id == virtual_controller_id
+                        ):
+                            continue
                         try:
                             XInput.set_vibration(controller_id, left_motor, right_motor)
                             success_count += 1
@@ -296,6 +319,84 @@ class ControllerManager:
             'source': source
         }
     
+    def start_game_feedback_proxy(self, poll_hz=250):
+        """启动实体XInput -> 虚拟X360代理，以捕获游戏原生震动。"""
+        if self.current_controller_id is None:
+            print("⚠️ 无实体XInput手柄，无法启动游戏震动代理")
+            return False
+
+        if self.game_feedback_proxy is not None:
+            try:
+                if self.game_feedback_proxy.is_running:
+                    return True
+            except Exception:
+                pass
+
+        try:
+            from game_feedback_proxy import GameFeedbackProxy
+
+            proxy = GameFeedbackProxy(
+                controller_manager=self,
+                physical_controller_id=self.current_controller_id,
+                poll_hz=poll_hz,
+            )
+            if not proxy.start():
+                self.game_feedback_proxy = proxy
+                return False
+
+            self.game_feedback_proxy = proxy
+            return True
+        except Exception as e:
+            print(f"⚠️ 启动游戏原生震动代理失败: {e}")
+            return False
+
+    def stop_game_feedback_proxy(self):
+        """停止游戏原生震动代理并移除虚拟X360手柄。"""
+        proxy = self.game_feedback_proxy
+        self.game_feedback_proxy = None
+        if proxy is not None:
+            try:
+                proxy.stop()
+            except Exception as e:
+                print(f"停止游戏震动代理失败: {e}")
+        self.clear_game_vibration_feedback()
+
+    def restart_game_feedback_proxy(self, poll_hz=None):
+        """重启代理，供手柄重连/GUI手动恢复时使用。"""
+        old_status = self.get_game_feedback_proxy_status()
+        if poll_hz is None:
+            poll_hz = old_status.get('poll_hz', 250)
+
+        self.stop_game_feedback_proxy()
+        if self.current_controller_id is None:
+            self.scan_controllers()
+        return self.start_game_feedback_proxy(poll_hz=poll_hz)
+
+    def get_game_feedback_proxy_status(self):
+        """返回虚拟手柄代理状态。"""
+        if self.game_feedback_proxy is None:
+            return {
+                'running': False,
+                'physical_controller_id': self.current_controller_id,
+                'virtual_controller_id': None,
+                'poll_hz': None,
+                'last_input_age': float('inf'),
+                'mirror_updates': 0,
+                'last_error': None,
+            }
+        try:
+            return self.game_feedback_proxy.get_status()
+        except Exception as e:
+            return {
+                'running': False,
+                'physical_controller_id': self.current_controller_id,
+                'virtual_controller_id': None,
+                'poll_hz': None,
+                'last_input_age': float('inf'),
+                'mirror_updates': 0,
+                'last_error': str(e),
+            }
+
     def stop_vibration(self, force=False):
         """停止所有震动"""
         return self.set_vibration(0, 0, force=force)
@@ -421,6 +522,7 @@ class ControllerManager:
     def cleanup(self):
         """清理资源"""
         print("清理控制器资源...")
+        self.stop_game_feedback_proxy()
         self.detach_game_feedback_source()
         self.emergency_stop()
         # XInput库不需要显式关闭连接
