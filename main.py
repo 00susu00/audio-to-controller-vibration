@@ -346,7 +346,11 @@ def run_command_line_mode(args):
                 audio_data = audio_processor.get_latest_audio_data(timeout=0.1)
                 if audio_data is not None:
                     volume_analysis = audio_processor.get_volume_analysis(audio_data)
-                    vibration_status = vibration_mapper.process_audio_frame(volume_analysis)
+                    vibration_status = vibration_mapper.process_audio_frame(
+                        volume_analysis,
+                        audio_processor,
+                        audio_data
+                    )
                     
                     # 显示状态
                     low_freq = volume_analysis.get('smoothed_low_rms', 0)
