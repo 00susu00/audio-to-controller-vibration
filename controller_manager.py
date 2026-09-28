@@ -365,7 +365,7 @@ class ControllerManager:
         """重启代理，供手柄重连/GUI手动恢复时使用。"""
         old_status = self.get_game_feedback_proxy_status()
         if poll_hz is None:
-            poll_hz = old_status.get('poll_hz', 250)
+            poll_hz = old_status.get('poll_hz') or 250
 
         self.stop_game_feedback_proxy()
         if self.current_controller_id is None:
